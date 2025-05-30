@@ -27,7 +27,7 @@ const config = {
   },
   
   // 系统配置
-  maxPairsPerRun: 50,      // 每次运行最多检测的交易对数(防止API限制)
+  maxPairsPerRun: 500,      // 每次运行最多检测的交易对数(防止API限制)
   checkInterval: 15 * 60 * 1000 // 15分钟检测一次
 };
 
