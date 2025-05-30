@@ -10,14 +10,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      # 恢复状态文件（仅在非首次运行时下载）
-      - name: 下载状态文件
-        uses: actions/download-artifact@v3
+      # 使用缓存恢复状态文件
+      - name: 恢复状态缓存
+        id: cache-state
+        uses: actions/cache@v3
         with:
-          name: monitor-state
-          path: ./
-        continue-on-error: true  # 允许首次运行时没有状态文件
-          
+          path: monitor-state.json
+          key: monitor-state-${{ github.run_id }}
+          restore-keys: |
+            monitor-state-
+      
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -27,13 +29,14 @@ jobs:
       - name: 运行监控
         run: node monitor-all-pairs-rotating.js
         
-      # 保存状态文件
-      - name: 上传状态文件
-        uses: actions/upload-artifact@v3
+      # 保存状态到缓存
+      - name: 保存状态缓存
+        uses: actions/cache@v3
         with:
-          name: monitor-state
           path: monitor-state.json
-          retention-days: 1  # 只保留一天的状态文件
+          key: monitor-state-${{ github.run_id }}
+          restore-keys: |
+            monitor-state-
           
       - name: 显示时间
         run: date
