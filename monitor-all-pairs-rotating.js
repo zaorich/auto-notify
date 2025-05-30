@@ -100,13 +100,13 @@ async function monitor() {
 }
 
 // 状态管理函数
+// 在 loadState() 函数中添加初始化逻辑
 async function loadState() {
   try {
     if (fs.existsSync(config.stateFile)) {
       const data = fs.readFileSync(config.stateFile, 'utf8');
       const savedState = JSON.parse(data);
       
-      // 只恢复必要的状态，防止配置变更导致问题
       state.binance.allSymbols = savedState.binance?.allSymbols || [];
       state.binance.lastIndex = savedState.binance?.lastIndex || 0;
       state.binance.lastRun = savedState.binance?.lastRun || 0;
@@ -116,12 +116,28 @@ async function loadState() {
       state.okx.lastRun = savedState.okx?.lastRun || 0;
       
       console.log('已加载之前的状态');
+      return;
     }
   } catch (error) {
     console.error('加载状态失败:', error);
   }
-}
 
+  // 如果没有状态文件，初始化新状态
+  console.log('初始化新状态');
+  state = {
+    binance: {
+      allSymbols: [],
+      lastIndex: 0,
+      lastRun: 0
+    },
+    okx: {
+      allSymbols: [],
+      lastIndex: 0,
+      lastRun: 0
+    }
+  };
+}
+  
 async function saveState() {
   try {
     fs.writeFileSync(config.stateFile, JSON.stringify(state, null, 2));
