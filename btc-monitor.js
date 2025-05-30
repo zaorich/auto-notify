@@ -5,7 +5,7 @@ const config = {
   // 价格监控阈值
   priceThreshold: 50000, // 当BTC超过这个价格时通知
   // Server酱微信通知（https://sct.ftqq.com）
-  wechatKey: 'SCT123456ABCDEFG',
+  wechatKey: 'SCT281228TBF1BQU3KUJ4vLRkykhzIE80e',
   // 邮件通知配置（可选）
   email: {
     service: 'QQ',
