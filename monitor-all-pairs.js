@@ -7,7 +7,7 @@ const config = {
   fourHourSpikeThreshold: 5, // 4小时成交量是前一根的5倍
   hourMaThreshold: 8,       // 1小时成交量是MA20的8倍
   fourHourMaThreshold: 5,   // 4小时成交量是MA20的5倍
-  minQuoteVolume: 1000000,  // 最小成交额过滤(1百万美元)
+  minQuoteVolume: 50000000,  // 最小成交额过滤(5000万美元)
   
   // 交易所API
   binance: {
