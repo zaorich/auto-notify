@@ -31,7 +31,8 @@ const config = {
   // 系统配置
   pairsPerRun: 10,          // 每次运行检测的交易对数
   checkInterval: 15 * 60 * 1000, // 15分钟检测一次
-  stateFile: 'monitor-state.json' // 状态保存文件
+  stateFile: 'monitor-state.json', // 状态保存文件
+  heartbeatInterval: 6 * 60 * 60 * 1000 // 心跳间隔6小时
 };
 
 // 状态管理
@@ -45,6 +46,12 @@ let state = {
     allSymbols: [],
     lastIndex: 0,
     lastRun: 0
+  },
+  stats: {
+    totalRuns: 0,
+    lastRunTime: null,
+    spikesDetected: 0,
+    lastHeartbeat: 0
   }
 };
 
@@ -56,6 +63,10 @@ async function monitor() {
   try {
     // 加载或初始化状态
     await loadState();
+    
+    // 更新统计信息
+    state.stats.totalRuns++;
+    state.stats.lastRunTime = new Date();
     
     // 获取所有交易对(如果尚未获取或需要刷新)
     if (shouldRefreshSymbols()) {
@@ -70,6 +81,7 @@ async function monitor() {
     
     if (binanceSymbols.length === 0 && okxSymbols.length === 0) {
       console.log('没有可检测的交易对');
+      await sendNoTradingPairsNotification();
       return;
     }
     
@@ -80,24 +92,19 @@ async function monitor() {
     ]);
     
     const allSpikes = [...binanceSpikes, ...okxSpikes];
+    state.stats.spikesDetected += allSpikes.length;
     
     if (allSpikes.length > 0) {
       console.log(`检测到 ${allSpikes.length} 个爆量信号`);
-      await sendServerChanNotifications(allSpikes);
     } else {
-      // 微信通知
-      try {
-        await axios.post(`https://sctapi.ftqq.com/${serverChan.sckey}.send`, {
-          title: 'BTC价格警报',
-          desp: message
-        });
-        console.log('微信通知已发送');
-      } catch (e) {
-        console.error('微信通知发送失败:', e.message);
-      }
-      
       console.log('未检测到爆量信号');
     }
+    
+    // 发送通知（无论是否有爆量）
+    await sendServerChanNotifications(allSpikes);
+    
+    // 检查是否需要发送心跳
+    await checkHeartbeat();
     
     // 更新状态并保存
     updateStateIndexes(binanceSymbols.length, okxSymbols.length);
@@ -105,50 +112,31 @@ async function monitor() {
     
   } catch (error) {
     console.error('监控出错:', error);
+    await sendErrorNotification(error);
   }
   
   console.log(`监控完成，耗时: ${(new Date() - startTime)/1000}秒`);
 }
 
 // 状态管理函数
-// 在 loadState() 函数中添加初始化逻辑
 async function loadState() {
   try {
     if (fs.existsSync(config.stateFile)) {
       const data = fs.readFileSync(config.stateFile, 'utf8');
       const savedState = JSON.parse(data);
       
-      state.binance.allSymbols = savedState.binance?.allSymbols || [];
-      state.binance.lastIndex = savedState.binance?.lastIndex || 0;
-      state.binance.lastRun = savedState.binance?.lastRun || 0;
-      
-      state.okx.allSymbols = savedState.okx?.allSymbols || [];
-      state.okx.lastIndex = savedState.okx?.lastIndex || 0;
-      state.okx.lastRun = savedState.okx?.lastRun || 0;
+      // 恢复状态
+      state.binance = savedState.binance || state.binance;
+      state.okx = savedState.okx || state.okx;
+      state.stats = savedState.stats || state.stats;
       
       console.log('已加载之前的状态');
-      return;
     }
   } catch (error) {
     console.error('加载状态失败:', error);
   }
-
-  // 如果没有状态文件，初始化新状态
-  console.log('初始化新状态');
-  state = {
-    binance: {
-      allSymbols: [],
-      lastIndex: 0,
-      lastRun: 0
-    },
-    okx: {
-      allSymbols: [],
-      lastIndex: 0,
-      lastRun: 0
-    }
-  };
 }
-  
+
 async function saveState() {
   try {
     fs.writeFileSync(config.stateFile, JSON.stringify(state, null, 2));
@@ -214,11 +202,11 @@ function getSymbolsForThisRun() {
   const okxSymbols = [];
   
   // 计算每个交易所应该检测的交易对数(尽量平均分配)
-  const binanceCount = Math.min(
+  let binanceCount = Math.min(
     Math.ceil(config.pairsPerRun / 2),
     state.binance.allSymbols.length
   );
-  const okxCount = Math.min(
+  let okxCount = Math.min(
     Math.floor(config.pairsPerRun / 2),
     state.okx.allSymbols.length
   );
@@ -428,7 +416,7 @@ async function getDailyKline(exchange, symbol) {
       };
     } else {
       const response = await axios.get(
-`        `${config.okx.dailyKline}&instId=${symbol}&limit=1`
+        `${config.okx.dailyKline}&instId=${symbol}&limit=1`
       );
       const kline = response.data.data[0];
       return {
@@ -447,43 +435,127 @@ async function getDailyKline(exchange, symbol) {
   }
 }
 
-// 发送Server酱通知
+// 发送无交易对可检测的通知
+async function sendNoTradingPairsNotification() {
+  const message = `## 爆量监控系统通知\n\n` +
+                 `**检测时间**: ${new Date().toLocaleString()}\n\n` +
+                 `⚠️ 没有可检测的交易对\n\n` +
+                 `请检查交易所API是否正常`;
+  
+  try {
+    await axios.post(`https://sctapi.ftqq.com/${config.serverChan.sckey}.send`, {
+      title: `爆量监控 - 无交易对可检测`,
+      desp: message
+    });
+    console.log('无交易对通知发送成功');
+  } catch (error) {
+    console.error('无交易对通知发送失败:', error.message);
+  }
+}
+
+// 发送错误通知
+async function sendErrorNotification(error) {
+  const message = `## 爆量监控系统错误\n\n` +
+                 `**发生时间**: ${new Date().toLocaleString()}\n\n` +
+                 `**错误信息**:\n` +
+                 `\`\`\`\n${error.message}\n\`\`\`\n\n` +
+                 `**堆栈跟踪**:\n` +
+                 `\`\`\`\n${error.stack}\n\`\`\``;
+  
+  try {
+    await axios.post(`https://sctapi.ftqq.com/${config.serverChan.sckey}.send`, {
+      title: `爆量监控 - 系统错误`,
+      desp: message
+    });
+    console.log('错误通知发送成功');
+  } catch (err) {
+    console.error('错误通知发送失败:', err.message);
+  }
+}
+
+// 检查并发送心跳
+async function checkHeartbeat() {
+  // 每隔6小时发送一次心跳
+  if (Date.now() - state.stats.lastHeartbeat > config.heartbeatInterval) {
+    try {
+      await axios.post(`https://sctapi.ftqq.com/${config.serverChan.sckey}.send`, {
+        title: `爆量监控系统运行正常`,
+        desp: `## 系统心跳检测\n\n` +
+              `**最后运行时间**: ${new Date().toLocaleString()}\n\n` +
+              `**统计信息**:\n` +
+              `- 总运行次数: ${state.stats.totalRuns}\n` +
+              `- 累计检测到爆量: ${state.stats.spikesDetected}次\n` +
+              `- Binance交易对: ${state.binance.allSymbols.length}个\n` +
+              `- OKX交易对: ${state.okx.allSymbols.length}个`
+      });
+      state.stats.lastHeartbeat = Date.now();
+      console.log('心跳通知发送成功');
+    } catch (error) {
+      console.error('心跳通知发送失败:', error.message);
+    }
+  }
+}
+
+// 发送Server酱通知（修改版）
 async function sendServerChanNotifications(spikes) {
   // 按交易所分组
   const grouped = spikes.reduce((acc, spike) => {
     if (!acc[spike.exchange]) acc[spike.exchange] = [];
     acc[spike.exchange].push(spike);
     return acc;
-  }, {});
+  }, {
+    binance: [],
+    okx: []
+  });
   
-  // 为每个交易所发送一条汇总通知
+  // 为每个交易所发送通知
   for (const [exchange, exchangeSpikes] of Object.entries(grouped)) {
     const exchangeName = exchange === 'binance' ? 'Binance' : 'OKX';
+    const symbolsChecked = exchange === 'binance' 
+      ? getSymbolsForThisRun()[0].length 
+      : getSymbolsForThisRun()[1].length;
     
-    // 构造Markdown消息
-    let message = `## ${exchangeName} 爆量警报汇总\n\n`;
-    message += `**检测时间**: ${new Date().toLocaleString()}\n\n`;
-    message += "| 交易对 | 类型 | 价格 | 成交量 | 倍数 | 24h成交额 |\n";
-    message += "|--------|------|------|--------|------|----------|\n";
-    
-    exchangeSpikes.forEach(spike => {
-      const typeMap = {
-        'hour': '1小时',
-        'hour-ma': '1小时MA',
-        'fourhour': '4小时',
-        'fourhour-ma': '4小时MA'
-      };
+    let message;
+    if (exchangeSpikes.length > 0) {
+      // 构造爆量警报消息
+      message = `## ${exchangeName} 爆量警报汇总\n\n`;
+      message += `**检测时间**: ${new Date().toLocaleString()}\n\n`;
+      message += `**检测统计**:\n`;
+      message += `- 已检测交易对: ${state[exchange].allSymbols.length}个\n`;
+      message += `- 本次检测交易对: ${symbolsChecked}个\n\n`;
+      message += "| 交易对 | 类型 | 价格 | 成交量 | 倍数 | 24h成交额 |\n";
+      message += "|--------|------|------|--------|------|----------|\n";
       
-      message += `| ${spike.symbol} | ${typeMap[spike.type]} | ${spike.price.toFixed(4)} `;
-      message += `| ${spike.currentVolume.toLocaleString()} | ${spike.ratio.toFixed(1)}x `;
-      message += `| ${formatVolume(spike.dailyQuoteVolume)} |\n`;
-    });
-    
-    message += `\n[查看完整报告](${getReportLink(exchangeSpikes)})`;
+      exchangeSpikes.forEach(spike => {
+        const typeMap = {
+          'hour': '1小时',
+          'hour-ma': '1小时MA',
+          'fourhour': '4小时',
+          'fourhour-ma': '4小时MA'
+        };
+        
+        message += `| ${spike.symbol} | ${typeMap[spike.type]} | ${spike.price.toFixed(4)} `;
+        message += `| ${spike.currentVolume.toLocaleString()} | ${spike.ratio.toFixed(1)}x `;
+        message += `| ${formatVolume(spike.dailyQuoteVolume)} |\n`;
+      });
+      
+      message += `\n[查看完整报告](${getReportLink(exchangeSpikes)})`;
+    } else {
+      // 构造无爆量通知消息
+      message = `## ${exchangeName} 爆量监控报告\n\n`;
+      message += `**检测时间**: ${new Date().toLocaleString()}\n\n`;
+      message += `**检测统计**:\n`;
+      message += `- 已检测交易对: ${state[exchange].allSymbols.length}个\n`;
+      message += `- 本次检测交易对: ${symbolsChecked}个\n\n`;
+      message += "✅ 本次检测未发现爆量信号\n\n";
+      message += `**系统状态**:\n`;
+      message += `- 总运行次数: ${state.stats.totalRuns}\n`;
+      message += `- 累计检测到爆量: ${state.stats.spikesDetected}次\n`;
+    }
     
     try {
       await axios.post(`https://sctapi.ftqq.com/${config.serverChan.sckey}.send`, {
-        title: `${exchangeName} 爆量警报 (${exchangeSpikes.length}个)`,
+        title: `${exchangeName} 爆量监控 - ${exchangeSpikes.length > 0 ? '发现' + exchangeSpikes.length + '个爆量' : '未发现爆量'}`,
         desp: message
       });
       console.log(`${exchangeName} Server酱通知发送成功`);
@@ -504,8 +576,12 @@ function formatVolume(volume) {
   return `$${Math.round(volume).toLocaleString()}`;
 }
 
-// 生成报告链接(示例)
+// 生成报告链接
 function getReportLink(spikes) {
+  if (!spikes || spikes.length === 0) {
+    return 'https://www.tradingview.com/markets/cryptocurrencies/prices-all/';
+  }
+  
   const exchange = spikes[0].exchange;
   const symbol = spikes[0].symbol;
   
