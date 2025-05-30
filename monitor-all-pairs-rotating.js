@@ -85,6 +85,16 @@ async function monitor() {
       console.log(`检测到 ${allSpikes.length} 个爆量信号`);
       await sendServerChanNotifications(allSpikes);
     } else {
+
+      try {
+        await axios.post(`https://sctapi.ftqq.com/${config.serverChan.sckey}.send`, {
+          title: `运行了)`,
+          desp: "没有爆量数据"
+        });
+        console.log(`${exchangeName} Server酱通知发送成功`);
+      } catch (error) {
+        console.error(`${exchangeName} Server酱通知发送失败:`, error.message);
+      }
       console.log('未检测到爆量信号');
     }
     
@@ -417,7 +427,7 @@ async function getDailyKline(exchange, symbol) {
       };
     } else {
       const response = await axios.get(
-        `${config.okx.dailyKline}&instId=${symbol}&limit=1`
+`        `${config.okx.dailyKline}&instId=${symbol}&limit=1`
       );
       const kline = response.data.data[0];
       return {
