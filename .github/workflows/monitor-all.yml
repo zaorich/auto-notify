@@ -24,7 +24,7 @@ jobs:
       - run: npm install axios
       
       - name: 运行监控
-        run: node monitor-all-pairs-rotating.js
+        run: node monitor-all-pairs.js
         
       # 保存状态文件
       - name: 保存状态
