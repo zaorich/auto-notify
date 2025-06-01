@@ -1,0 +1,11 @@
+{
+  "cacheFile": "volume-cache.json",
+  "apiSettings": {
+    "baseUrl": "https://fapi.binance.com",
+    "rateLimit": 500
+  },
+  "alertThresholds": {
+    "minVolume": 1000000,
+    "topN": 10
+  }
+}
