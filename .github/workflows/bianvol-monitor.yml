@@ -1,0 +1,45 @@
+name: Bianvol Monitor
+
+on:
+  schedule:
+    - cron: '0 * * * *'  # 每小时整点运行
+  workflow_dispatch:     # 允许手动触发
+
+env:
+  TZ: Asia/Shanghai      # 设置北京时间
+  NODE_ENV: production
+  CHECK_INTERVAL: 3600   # 检查间隔(秒)
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3    # 超时设置
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install --production
+
+      - name: Run Bianvol Monitor
+        run: |
+          echo "▄︻デ══━ 启动币安爆量监控 ══━一═══"
+          node bianvol.js
+          echo "监控任务执行完毕！状态码: $?"
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: bianvol-logs-${{ github.run_number }}
+          path: |
+            *.log
+            logs/
+          retention-days: 3
