@@ -1,23 +1,22 @@
 {
   "name": "crypto-volume-alert",
-  "version": "2.0.0",
-  "description": "Binance Volume Spike Monitor with Multi-Pair Rotation",
-  "main": "monitor-all-pairs-rotating.js",
+  "version": "2.0.1",
+  "description": "Binance Volume Monitoring System",
+  "main": "src/index.js",
   "scripts": {
-    "start": "node bianvol.js",
-    "monitor-all": "node monitor-all-pairs-rotating.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node src/bianvol.js",
+    "monitor-all": "node src/monitor-all-pairs-rotating.js",
+    "preinstall": "npm install -g npm@latest",
+    "ci": "npm ci --production"
   },
   "dependencies": {
     "axios": "^1.6.7"
   },
   "engines": {
-    "node": ">=20.x"
+    "node": ">=20.x",
+    "npm": ">=10.x"
   },
-  "config": {
-    "monitoring-strategies": {
-      "single": "bianvol.js (随机单交易对检测)",
-      "rotation": "monitor-all-pairs-rotating.js (全交易对轮询检测)"
-    }
-  }
+  "files": [
+    "src/**/*.js"
+  ]
 }
