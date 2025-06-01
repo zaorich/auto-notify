@@ -1,41 +1,22 @@
-name: Bianvol Monitor
-
-on:
-  schedule:
-    - cron: '0 * * * *'  # 每小时整点运行
-  workflow_dispatch:     # 允许手动触发
-
-env:
-  TZ: Asia/Shanghai      # 设置北京时间
-  NODE_ENV: production
-
-jobs:
-  monitor:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm install --production
-
-      - name: Run Bianvol Monitor
-        run: node bianvol.js
-
-      - name: Upload logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: bianvol-logs-${{ github.run_id }}
-          path: |
-            *.log
-            logs/
-          retention-days: 3
+{
+  "name": "crypto-volume-alert",
+  "version": "2.0.1",
+  "description": "Binance Volume Monitoring System",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/bianvol.js",
+    "monitor-all": "node src/monitor-all-pairs-rotating.js",
+    "preinstall": "npm install -g npm@latest",
+    "ci": "npm ci --production"
+  },
+  "dependencies": {
+    "axios": "^1.6.7"
+  },
+  "engines": {
+    "node": ">=20.x",
+    "npm": ">=10.x"
+  },
+  "files": [
+    "src/**/*.js"
+  ]
+}
