@@ -6,3 +6,20 @@
     "axios": "^1.6.2"
   }
 }
+
+
+{
+  "name": "bianvol-monitor",
+  "version": "1.0.0",
+  "description": "Binance Volume Spike Monitor",
+  "main": "bianvol.js",
+  "scripts": {
+    "start": "node bianvol.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.7"
+  },
+  "engines": {
+    "node": ">=20.x"
+  }
+}
