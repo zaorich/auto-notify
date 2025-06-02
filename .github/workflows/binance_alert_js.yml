@@ -1,0 +1,27 @@
+name: Binance Volume Alert (Node.js)
+
+on:
+  schedule:
+    # Runs at 5 minutes past every hour
+    - cron: '5 * * * *'
+  workflow_dispatch: # Allows manual triggering
+
+jobs:
+  run_alert_script_js:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18' # Or '20', or other LTS version
+
+      - name: Install dependencies
+        run: npm install # This will install axios based on package.json
+
+      - name: Run Binance Volume Alert Script (Node.js)
+        env:
+          SERVERCHAN_SENDKEY: ${{ secrets.SERVERCHAN_SENDKEY }}
+        run: node binance_alert.js # Or npm start if you prefer
