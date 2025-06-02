@@ -1,15 +1,14 @@
 import os
 import time
 import pandas as pd
-import requests
-from binance.client import Client # 确保 Client 被正确导入
+import requests # 使用 requests 替代 python-binance 的 Client
 from datetime import datetime
 
 # --- 配置参数 ---
-# SERVERCHAN_SENDKEY 仍然需要从环境变量中获取
 SERVERCHAN_SENDKEY = os.environ.get('SERVERCHAN_SENDKEY')
 
-KLINE_INTERVAL = Client.KLINE_INTERVAL_1HOUR
+# KLINE_INTERVAL 现在直接使用字符串，因为不再用 Client.KLINE_INTERVAL_1HOUR
+KLINE_INTERVAL_STR = "1h" # 币安API要求的小时K线间隔字符串
 VOLUME_MULTIPLIER = 10
 MA_PERIOD = 20
 
@@ -18,20 +17,16 @@ QUOTE_ASSET_FILTER = 'USDT'
 CONTRACT_TYPE_FILTER = 'PERPETUAL'
 STATUS_FILTER = 'TRADING'
 
-# --- 初始化币安客户端 (无需 API Key/Secret) ---
-client = Client()
+# 币安U本位合约公共API基础URL
+BINANCE_FUTURES_BASE_URL = "https://fapi.binance.com"
 
 def send_serverchan_notification(title, content):
     """发送 Server酱 通知"""
     if not SERVERCHAN_SENDKEY:
         print("ServerChan SendKey 未配置，跳过通知。")
         return
-
     url = f"https://sctapi.ftqq.com/{SERVERCHAN_SENDKEY}.send"
-    data = {
-        "title": title,
-        "desp": content
-    }
+    data = {"title": title, "desp": content}
     try:
         response = requests.post(url, data=data, timeout=10)
         response.raise_for_status()
@@ -46,58 +41,95 @@ def send_serverchan_notification(title, content):
         print(f"发送 ServerChan 通知时发生未知错误: {e}")
 
 def get_tradable_usdt_perpetual_futures_symbols():
-    """获取所有可交易的USDT本位永续合约交易对"""
-    print(f"正在获取币安 {QUOTE_ASSET_FILTER} 本位永续合约交易对列表 (公共API)...")
+    """使用 requests 获取所有可交易的USDT本位永续合约交易对"""
+    print(f"正在获取币安 {QUOTE_ASSET_FILTER} 本位永续合约交易对列表 (直接API请求)...")
+    endpoint = "/fapi/v1/exchangeInfo"
+    url = BINANCE_FUTURES_BASE_URL + endpoint
     try:
-        exchange_info = client.futures_exchange_info() # U本位合约信息
+        response = requests.get(url, timeout=15) # 增加超时时间
+        response.raise_for_status()  # 如果HTTP请求返回了错误状态码，则抛出异常
+        exchange_info = response.json()
         symbols = []
         for item in exchange_info['symbols']:
             if (item['quoteAsset'] == QUOTE_ASSET_FILTER and
                 item['contractType'] == CONTRACT_TYPE_FILTER and
                 item['status'] == STATUS_FILTER and
-                # 额外的过滤，以防万一API返回一些非标准永续合约名称
-                # 正常的永续合约如 BTCUSDT, ETHUSDT
-                # 有些平台可能有类似 BTC_PERP 的，或者交割合约 BTCUSDT_240628
-                # contractType == 'PERPETUAL' 应该能过滤掉大部分非永续
-                # 此处 '_' not in item['pair'] 可能更准确，因为 'pair' 是 'BTCUSDT'
-                # 但 'symbol' 也是 'BTCUSDT' for perpetuals.
-                # 对于永续合约, symbol 和 pair 通常是一样的。
-                # 保留这个过滤，以防出现如 BTCUSDT_ settimestamp 这种奇怪的永续合约变种
-                '_' not in item['symbol']
-                ):
+                '_' not in item['symbol'] # 进一步过滤，例如 BTCUSDT_230929
+               ):
                 symbols.append(item['symbol'])
-        
         symbols.sort()
         print(f"获取到 {len(symbols)} 个符合条件的交易对。")
         if len(symbols) > 0:
             print(f"部分交易对示例: {', '.join(symbols[:5])}...")
         return symbols
-    except Exception as e:
+    except requests.exceptions.Timeout:
+        print(f"获取合约交易对列表超时: {url}")
+        return []
+    except requests.exceptions.RequestException as e:
         print(f"获取合约交易对列表失败: {e}")
         return []
+    except Exception as e: # 例如 JSONDecodeError
+        print(f"处理合约交易对列表响应数据时出错: {e}")
+        return []
 
-def get_klines_data(symbol, interval, limit=50):
-    """获取K线数据并转换为DataFrame"""
+
+def get_klines_data(symbol, interval_str, limit=50):
+    """使用 requests 获取K线数据并转换为DataFrame"""
+    endpoint = "/fapi/v1/klines"
+    url = BINANCE_FUTURES_BASE_URL + endpoint
+    params = {
+        'symbol': symbol,
+        'interval': interval_str,
+        'limit': limit
+    }
     try:
-        klines = client.futures_klines(symbol=symbol, interval=interval, limit=limit) # U本位合约K线
-        df = pd.DataFrame(klines, columns=[
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        klines_raw = response.json()
+        # API返回的K线数据格式:
+        # [
+        #   [
+        #     1499040000000,      // Open time
+        #     "0.01634790",       // Open
+        #     "0.80000000",       // High
+        #     "0.01575800",       // Low
+        #     "0.01577100",       // Close
+        #     "148976.11427815",  // Volume  <-- 我们需要这个
+        #     1499644799999,      // Close time
+        #     "2434.19055334",    // Quote asset volume
+        #     308,                // Number of trades
+        #     "1756.87402397",    // Taker buy base asset volume
+        #     "28.46694368",      // Taker buy quote asset volume
+        #     "17928899.62484339" // Ignore.
+        #   ]
+        # ]
+        df = pd.DataFrame(klines_raw, columns=[
             'Open time', 'Open', 'High', 'Low', 'Close', 'Volume',
             'Close time', 'Quote asset volume', 'Number of trades',
             'Taker buy base asset volume', 'Taker buy quote asset volume', 'Ignore'
         ])
         df['Open time'] = pd.to_datetime(df['Open time'], unit='ms')
         df['Close time'] = pd.to_datetime(df['Close time'], unit='ms')
+        # 确保交易量等字段是数字类型
         for col in ['Open', 'High', 'Low', 'Close', 'Volume', 'Quote asset volume']:
             df[col] = pd.to_numeric(df[col])
         return df
-    except Exception as e:
+    except requests.exceptions.Timeout:
+        print(f"获取 {symbol} K线数据超时: {url} with params {params}")
+        return None
+    except requests.exceptions.RequestException as e:
         print(f"获取 {symbol} K线数据失败: {e}")
         return None
+    except Exception as e: # 例如 JSONDecodeError 或 DataFrame处理错误
+        print(f"处理 {symbol} K线数据时出错: {e}")
+        return None
+
 
 def check_volume_alert(symbol):
     """检查指定交易对的交易量警报"""
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 正在检查 {symbol}...")
-    df = get_klines_data(symbol, KLINE_INTERVAL, limit=MA_PERIOD + 10)
+    # 使用 KLINE_INTERVAL_STR
+    df = get_klines_data(symbol, KLINE_INTERVAL_STR, limit=MA_PERIOD + 10)
 
     if df is None or len(df) < MA_PERIOD + 2:
         print(f"{symbol} 数据不足，无法进行分析 (需要至少 {MA_PERIOD + 2} 条, 实际 {len(df) if df is not None else 0} 条)。")
@@ -112,18 +144,20 @@ def check_volume_alert(symbol):
     current_candle_index = -1
     previous_candle_index = -2
 
-    if abs(previous_candle_index) > len(df):
-        print(f"{symbol} 数据条数不足以获取前一根K线。")
+    if abs(previous_candle_index) > len(df): # 确保有足够的数据行
+        print(f"{symbol} 数据条数不足以获取前一根K线 (需要 {abs(previous_candle_index)+1} 条, 实际 {len(df)} 条)。")
         return
 
     current_volume = df['Volume'].iloc[current_candle_index]
     current_close_time = df['Close time'].iloc[current_candle_index]
     previous_volume = df['Volume'].iloc[previous_candle_index]
     
-    if len(df) < MA_PERIOD + 1:
+    if len(df) < MA_PERIOD + 1: # 确保有足够数据计算MA
         ma20_volume = float('nan')
     else:
+        # MA20是基于 previous_candle_index 及之前的K线计算得到的
         ma20_volume = df['Volume_MA'].iloc[previous_candle_index]
+
 
     print(f"{symbol} @ {current_close_time.strftime('%Y-%m-%d %H:%M')} UTC:")
     print(f"  当前交易量: {current_volume:,.2f}")
@@ -154,6 +188,7 @@ def check_volume_alert(symbol):
     elif pd.isna(ma20_volume):
         print(f"  INFO: MA{MA_PERIOD}交易量无法计算。")
 
+
     if alert_triggered:
         title = f"币安 {symbol} 合约小时交易量警报!"
         content = (
@@ -170,7 +205,7 @@ def check_volume_alert(symbol):
     print("-" * 30)
 
 if __name__ == "__main__":
-    print("开始执行币安合约交易量警报监控 (使用公共API)。")
+    print("开始执行币安合约交易量警报监控 (使用直接API请求)。")
     
     if not SERVERCHAN_SENDKEY:
         print("警告: SERVERCHAN_SENDKEY 未配置，将无法发送通知。")
@@ -179,11 +214,13 @@ if __name__ == "__main__":
 
     if not symbols_to_monitor:
         print("未能获取到可监控的合约交易对，脚本终止。")
-        exit()
+        exit(1) # 明确以非零状态码退出，表示有问题
     
     print(f"将监控 {len(symbols_to_monitor)} 个交易对。")
     
-    sleep_between_symbols = 0.5 # 每检查一个交易对后暂停的秒数, 避免IP频率限制
+    # 减少休眠时间，因为 requests 可能比完整的 client 库轻量一些
+    # 但仍保留以避免对API造成冲击
+    sleep_between_symbols = 0.3 
 
     for symbol_item in symbols_to_monitor:
         check_volume_alert(symbol_item)
