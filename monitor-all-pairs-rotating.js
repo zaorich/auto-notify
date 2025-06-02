@@ -503,7 +503,8 @@ async function checkHeartbeat() {
       await axios.post(`https://sctapi.ftqq.com/${config.serverChan.sckey}.send`, {
         title: `爆量监控系统运行正常`,
         desp: `## 系统心跳检测\n\n` +
-              `**最后运行时间**: ${new Date().toLocaleString()}\n\n` +
+              // `**最后运行时间**: ${new Date().toLocaleString()}\n\n` +
+              `**最后运行时间**: ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })}\n\n` +
               `**统计信息**:\n` +
               `- 总运行次数: ${state.stats.totalRuns}\n` +
               `- 累计检测到爆量: ${state.stats.spikesDetected}次\n` +
