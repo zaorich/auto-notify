@@ -576,10 +576,13 @@ async function sendServerChanNotifications(spikes) {
     }
     
     try {
+      // 只有当有爆量时才发送通知
+  if (exchangeSpikes.length > 0) {
       await axios.post(`https://sctapi.ftqq.com/${config.serverChan.sckey}.send`, {
         title: `${exchangeName} 爆量监控 - ${exchangeSpikes.length > 0 ? '发现' + exchangeSpikes.length + '个爆量' : '未发现爆量'}`,
         desp: message
       });
+  }
       console.log(`${exchangeName} Server酱通知发送成功`);
     } catch (error) {
       console.error(`${exchangeName} Server酱通知发送失败:`, error.message);
