@@ -227,14 +227,17 @@ class OKXVolumeMonitor:
         else:
             return f"{volume:.2f}"
     
-    def create_alert_table(self, alerts):
+      def create_alert_table(self, alerts):
         """创建爆量警报的表格格式消息"""
         if not alerts:
             return ""
         
+        # **按当前交易额从高到低排序**
+        alerts_sorted = sorted(alerts, key=lambda x: x['current_volume'], reverse=True)
+        
         # 按时间框架分组
-        hour_alerts = [alert for alert in alerts if alert['timeframe'] == '1H']
-        four_hour_alerts = [alert for alert in alerts if alert['timeframe'] == '4H']
+        hour_alerts = [alert for alert in alerts_sorted if alert['timeframe'] == '1H']
+        four_hour_alerts = [alert for alert in alerts_sorted if alert['timeframe'] == '4H']
         
         content = ""
         
@@ -273,6 +276,7 @@ class OKXVolumeMonitor:
             content += "\n"
         
         return content
+
         """发送心跳监测消息"""
         current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         last_alert_time = self.get_last_alert_time()
