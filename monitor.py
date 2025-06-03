@@ -287,7 +287,7 @@ class OKXVolumeMonitor:
                 max_history_days = max(max_history_days, len(alert['daily_volumes_history']) - 1)  # 减1因为第一个是当天
         
         # 添加历史日期的表头
-        for i in range(1, min(max_history_days + 1, 7)):  # 最多显示过去6天
+        for i in range(0, min(max_history_days + 1, 7)):  # 最多显示过去6天
             if billion_alerts[0]['daily_volumes_history'] and len(billion_alerts[0]['daily_volumes_history']) > i:
                 date = billion_alerts[0]['daily_volumes_history'][i]['date']
                 header += f" {date} |"
