@@ -540,7 +540,7 @@ class OKXVolumeMonitor:
         return success
     
     def send_notification(self, title, content):
-        """通过Server酱发送微信通知"""
+        # """通过Server酱发送微信通知"""
         try:
             url = f"https://sctapi.ftqq.com/{self.server_jiang_key}.send"
             
