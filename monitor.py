@@ -12,6 +12,10 @@ import asyncio
 import aiohttp
 from concurrent.futures import ThreadPoolExecutor
 import threading
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+from io import BytesIO
+import base64
 
 class OKXVolumeMonitor:
     def __init__(self):
@@ -23,6 +27,11 @@ class OKXVolumeMonitor:
         })
         self.heartbeat_file = 'last_alert_time.txt'
         self.heartbeat_interval = 4 * 60 * 60  # 4小时（秒）
+        
+        # 设置matplotlib中文字体和样式
+        plt.rcParams['font.sans-serif'] = ['SimHei', 'DejaVu Sans', 'Arial Unicode MS', 'sans-serif']
+        plt.rcParams['axes.unicode_minus'] = False
+        plt.style.use('default')
         
     def get_perpetual_instruments(self):
         """获取永续合约交易对列表"""
@@ -109,10 +118,11 @@ class OKXVolumeMonitor:
                 daily_volumes = []
                 for kline in daily_klines:
                     timestamp = int(kline[0]) / 1000  # 转换为秒
-                    date = datetime.fromtimestamp(timestamp).strftime('%m-%d')
+                    date = datetime.fromtimestamp(timestamp)
                     volume = float(kline[7])  # 交易额
                     daily_volumes.append({
                         'date': date,
+                        'date_str': date.strftime('%m-%d'),
                         'volume': volume
                     })
                 return daily_volumes
@@ -266,8 +276,137 @@ class OKXVolumeMonitor:
         else:
             return f"{volume:.2f}"
     
-    def create_billion_volume_table(self, billion_alerts):
-        """创建过亿成交额的表格格式消息"""
+    def create_billion_volume_chart(self, billion_alerts):
+        """创建过亿成交额的曲线图"""
+        if not billion_alerts:
+            return ""
+        
+        try:
+            # 按当天交易额从高到低排序，取前10个
+            billion_alerts.sort(key=lambda x: x['current_daily_volume'], reverse=True)
+            top_alerts = billion_alerts[:10]  # 最多显示前10个
+            
+            # 设置图表尺寸和样式
+            fig, ax = plt.subplots(figsize=(14, 8))
+            fig.patch.set_facecolor('white')
+            
+            colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', 
+                     '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9']
+            
+            max_volume = 0
+            chart_data = []
+            
+            # 准备数据
+            for i, alert in enumerate(top_alerts):
+                history = alert['daily_volumes_history']
+                if not history:
+                    continue
+                    
+                # 按时间排序（从旧到新）
+                history.sort(key=lambda x: x['date'])
+                
+                dates = [item['date'] for item in history]
+                volumes = [item['volume'] / 1_000_000 for item in history]  # 转换为百万为单位
+                
+                max_volume = max(max_volume, max(volumes))
+                
+                chart_data.append({
+                    'inst_id': alert['inst_id'],
+                    'dates': dates,
+                    'volumes': volumes,
+                    'color': colors[i % len(colors)]
+                })
+            
+            # 绘制曲线
+            for data in chart_data:
+                ax.plot(data['dates'], data['volumes'], 
+                       marker='o', linewidth=2.5, markersize=6,
+                       color=data['color'], label=data['inst_id'],
+                       alpha=0.8)
+            
+            # 设置标题和标签
+            ax.set_title('💰 过亿成交额交易对 - 7日交易额趋势', 
+                        fontsize=16, fontweight='bold', pad=20)
+            ax.set_xlabel('日期', fontsize=12)
+            ax.set_ylabel('交易额 (百万 USDT)', fontsize=12)
+            
+            # 设置日期格式
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))
+            ax.xaxis.set_major_locator(mdates.DayLocator(interval=1))
+            plt.setp(ax.xaxis.get_majorticklabels(), rotation=45)
+            
+            # 设置网格
+            ax.grid(True, alpha=0.3, linestyle='--')
+            ax.set_facecolor('#FAFAFA')
+            
+            # 设置图例
+            if len(chart_data) <= 6:
+                ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', 
+                         frameon=True, fancybox=True, shadow=True)
+            else:
+                ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', 
+                         frameon=True, fancybox=True, shadow=True, ncol=2)
+            
+            # 添加一亿线参考
+            ax.axhline(y=100, color='red', linestyle='--', alpha=0.6, 
+                      linewidth=2, label='1亿USDT基准线')
+            
+            # 优化布局
+            plt.tight_layout()
+            
+            # 保存图片到内存
+            buffer = BytesIO()
+            plt.savefig(buffer, format='png', dpi=150, bbox_inches='tight',
+                       facecolor='white', edgecolor='none')
+            buffer.seek(0)
+            
+            # 转换为base64
+            image_base64 = base64.b64encode(buffer.getvalue()).decode()
+            plt.close(fig)
+            
+            # 创建带图片的markdown内容
+            content = "## 💰 日成交过亿信号\n\n"
+            
+            # 添加统计信息
+            total_volume = sum(alert['current_daily_volume'] for alert in top_alerts)
+            content += f"**统计信息**：\n"
+            content += f"- 过亿交易对数量：{len(billion_alerts)} 个\n"
+            content += f"- 总成交额：{self.format_volume(total_volume)}\n"
+            content += f"- 图表显示：前 {len(top_alerts)} 个交易对\n\n"
+            
+            # 嵌入base64图片
+            content += f"![过亿成交额趋势图](data:image/png;base64,{image_base64})\n\n"
+            
+            # 添加详细数据表格（简化版）
+            content += "**详细数据**：\n\n"
+            content += "| 排名 | 交易对 | 当日成交额 | 7日最高 | 7日最低 |\n"
+            content += "|------|--------|------------|---------|----------|\n"
+            
+            for i, alert in enumerate(top_alerts, 1):
+                inst_id = alert['inst_id']
+                current_vol = self.format_volume(alert['current_daily_volume'])
+                
+                history = alert['daily_volumes_history']
+                if history:
+                    volumes = [item['volume'] for item in history]
+                    max_vol = self.format_volume(max(volumes))
+                    min_vol = self.format_volume(min(volumes))
+                else:
+                    max_vol = min_vol = "-"
+                
+                content += f"| {i} | {inst_id} | **{current_vol}** | {max_vol} | {min_vol} |\n"
+            
+            content += "\n"
+            print(f"成功生成过亿成交额曲线图，包含 {len(top_alerts)} 个交易对")
+            return content
+            
+        except Exception as e:
+            print(f"生成过亿成交额曲线图时出错: {e}")
+            # 如果图表生成失败，回退到表格模式
+            return self.create_billion_volume_table_fallback(billion_alerts)
+    
+    def create_billion_volume_table_fallback(self, billion_alerts):
+        """创建过亿成交额的表格格式消息（回退方案）"""
         if not billion_alerts:
             return ""
         
@@ -289,7 +428,7 @@ class OKXVolumeMonitor:
         # 添加历史日期的表头
         for i in range(1, min(max_history_days + 1, 7)):  # 最多显示过去6天
             if billion_alerts[0]['daily_volumes_history'] and len(billion_alerts[0]['daily_volumes_history']) > i:
-                date = billion_alerts[0]['daily_volumes_history'][i]['date']
+                date = billion_alerts[0]['daily_volumes_history'][i]['date_str']
                 header += f" {date} |"
                 separator += "--------|"
         
@@ -482,10 +621,10 @@ class OKXVolumeMonitor:
                 table_content = self.create_alert_table(all_alerts)
                 content += table_content
             
-            # 再创建过亿成交额表格（放在最后）
+            # 再创建过亿成交额曲线图（替代原来的表格）
             if all_billion_alerts:
-                billion_table_content = self.create_billion_volume_table(all_billion_alerts)
-                content += billion_table_content
+                billion_chart_content = self.create_billion_volume_chart(all_billion_alerts)
+                content += billion_chart_content
             
             # 添加说明
             content += "---\n\n"
@@ -494,7 +633,8 @@ class OKXVolumeMonitor:
             content += "- **过亿信号**: 当天成交额超过1亿USDT\n"
             content += "- **相比上期**: 与上一个同周期的交易额对比\n"
             content += "- **相比MA10**: 与过去10个周期平均值对比\n"
-            content += "- **K/M/B**: 千/百万/十亿 USDT"
+            content += "- **K/M/B**: 千/百万/十亿 USDT\n"
+            content += "- **曲线图**: 显示过去7天交易额变化趋势"
             
             success = self.send_notification(title, content)
             if success:
