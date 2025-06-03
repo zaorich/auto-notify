@@ -21,6 +21,8 @@ class OKXVolumeMonitor:
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         })
+        self.heartbeat_file = 'last_alert_time.txt'
+        self.heartbeat_interval = 4 * 60 * 60  # 4小时（秒）
         
     def get_perpetual_instruments(self):
         """获取永续合约交易对列表"""
@@ -166,6 +168,65 @@ class OKXVolumeMonitor:
             print(f"检查 {inst_id} 时出错: {e}")
             return []
     
+    def get_last_alert_time(self):
+        """获取上次发送爆量警报的时间"""
+        try:
+            if os.path.exists(self.heartbeat_file):
+                with open(self.heartbeat_file, 'r') as f:
+                    timestamp = float(f.read().strip())
+                    return timestamp
+            return 0
+        except Exception as e:
+            print(f"读取上次警报时间失败: {e}")
+            return 0
+    
+    def update_last_alert_time(self):
+        """更新上次发送爆量警报的时间"""
+        try:
+            with open(self.heartbeat_file, 'w') as f:
+                f.write(str(time.time()))
+        except Exception as e:
+            print(f"更新上次警报时间失败: {e}")
+    
+    def should_send_heartbeat(self):
+        """检查是否需要发送心跳消息"""
+        last_alert_time = self.get_last_alert_time()
+        current_time = time.time()
+        time_since_last_alert = current_time - last_alert_time
+        
+        return time_since_last_alert >= self.heartbeat_interval
+    
+    def send_heartbeat_notification(self, monitored_count):
+        """发送心跳监测消息"""
+        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        last_alert_time = self.get_last_alert_time()
+        
+        if last_alert_time > 0:
+            last_alert_datetime = datetime.fromtimestamp(last_alert_time)
+            time_since_alert = datetime.now() - last_alert_datetime
+            hours_since = int(time_since_alert.total_seconds() / 3600)
+            
+            title = "OKX监控系统心跳 💓"
+            content = f"监控系统正常运行中...\n\n"
+            content += f"📊 监控状态: 正常\n"
+            content += f"📈 监控交易对: {monitored_count} 个\n"
+            content += f"⏰ 检查时间: {current_time}\n"
+            content += f"🔕 距离上次爆量警报: {hours_since} 小时\n"
+            content += f"📅 上次警报时间: {last_alert_datetime.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            content += f"💡 提示: 已连续 {hours_since} 小时无爆量信号"
+        else:
+            title = "OKX监控系统心跳 💓"
+            content = f"监控系统正常运行中...\n\n"
+            content += f"📊 监控状态: 正常\n"
+            content += f"📈 监控交易对: {monitored_count} 个\n"
+            content += f"⏰ 检查时间: {current_time}\n"
+            content += f"🔕 暂无爆量警报记录\n\n"
+            content += f"💡 提示: 系统首次运行或记录文件不存在"
+        
+        success = self.send_notification(title, content)
+        if success:
+            print("心跳消息发送成功")
+        return success
     def send_notification(self, title, content):
         """通过Server酱发送微信通知"""
         try:
@@ -236,9 +297,20 @@ class OKXVolumeMonitor:
                 content += f"{msg}\n\n"
                 content += "---\n\n"
             
-            self.send_notification(title, content)
+            success = self.send_notification(title, content)
+            if success:
+                # 更新上次发送爆量警报的时间
+                self.update_last_alert_time()
         else:
             print("未发现爆量情况")
+            
+            # 检查是否需要发送心跳消息
+            if self.should_send_heartbeat():
+                print("距离上次爆量警报已超过4小时，发送心跳消息")
+                heartbeat_success = self.send_heartbeat_notification(len(instruments))
+                if heartbeat_success:
+                    # 更新心跳时间（避免频繁发送心跳）
+                    self.update_last_alert_time()
         
         print(f"监控完成 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
