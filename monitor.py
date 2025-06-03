@@ -543,22 +543,64 @@ class OKXVolumeMonitor:
         """通过Server酱发送微信通知"""
         try:
             url = f"https://sctapi.ftqq.com/{self.server_jiang_key}.send"
+            
+            # 限制内容长度，避免超出Server酱限制
+            max_content_length = 15000  # Server酱内容限制约为20KB，保守设置15KB
+            if len(content) > max_content_length:
+                # 截断内容并添加提示
+                content = content[:max_content_length] + "\n\n... (内容过长已截断)"
+                print(f"警告：通知内容过长，已截断至 {max_content_length} 字符")
+            
+            # 限制标题长度
+            max_title_length = 100
+            if len(title) > max_title_length:
+                title = title[:max_title_length]
+                print(f"警告：标题过长，已截断至 {max_title_length} 字符")
+            
+            # 清理内容中可能导致问题的字符
+            content = self._clean_content_for_notification(content)
+            title = self._clean_content_for_notification(title)
+            
             data = {
                 'title': title,
                 'desp': content
             }
             
-            response = requests.post(url, data=data, timeout=30)
-            response.raise_for_status()
+            # 添加请求头
+            headers = {
+                'Content-Type': 'application/x-www-form-urlencoded; charset=utf-8',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+            
+            print(f"发送通知 - 标题长度: {len(title)}, 内容长度: {len(content)}")
+            
+            response = requests.post(url, data=data, headers=headers, timeout=30)
+            
+            # 打印详细的响应信息用于调试
+            print(f"响应状态码: {response.status_code}")
+            print(f"响应头: {dict(response.headers)}")
+            
+            if response.status_code != 200:
+                print(f"HTTP错误: {response.status_code}")
+                print(f"响应内容: {response.text}")
+                return False
             
             result = response.json()
+            print(f"Server酱响应: {result}")
+            
             if result.get('code') == 0:
                 print(f"通知发送成功: {title}")
                 return True
             else:
                 print(f"通知发送失败: {result}")
+                # 如果是因为内容过长导致的错误，尝试发送简化版本
+                if 'too long' in str(result).lower() or result.get('code') == 40001:
+                    return self._send_simplified_notification(title)
                 return False
                 
+        except requests.exceptions.RequestException as e:
+            print(f"请求异常: {e}")
+            return False
         except Exception as e:
             print(f"发送通知时出错: {e}")
             return False
