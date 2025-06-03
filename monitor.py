@@ -12,26 +12,21 @@ import asyncio
 import aiohttp
 from concurrent.futures import ThreadPoolExecutor
 import threading
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-from io import BytesIO
-import base64
 
 class OKXVolumeMonitor:
     def __init__(self):
         self.base_url = "https://www.okx.com"
-        self.server_jiang_key = os.environ.get('SERVER_JIANG_KEY', 'SCT281228TBF1BQU3KUJ4vLRkykhzIE80e')
+        # 请确保设置正确的SERVER_JIANG_KEY环境变量
+        self.server_jiang_key = os.environ.get('SERVER_JIANG_KEY', '')
+        if not self.server_jiang_key:
+            print("警告：未设置SERVER_JIANG_KEY环境变量")
+        
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         })
         self.heartbeat_file = 'last_alert_time.txt'
         self.heartbeat_interval = 4 * 60 * 60  # 4小时（秒）
-        
-        # 设置matplotlib中文字体和样式
-        plt.rcParams['font.sans-serif'] = ['SimHei', 'DejaVu Sans', 'Arial Unicode MS', 'sans-serif']
-        plt.rcParams['axes.unicode_minus'] = False
-        plt.style.use('default')
         
     def get_perpetual_instruments(self):
         """获取永续合约交易对列表"""
@@ -118,12 +113,12 @@ class OKXVolumeMonitor:
                 daily_volumes = []
                 for kline in daily_klines:
                     timestamp = int(kline[0]) / 1000  # 转换为秒
-                    date = datetime.fromtimestamp(timestamp)
+                    date = datetime.fromtimestamp(timestamp).strftime('%m-%d')
                     volume = float(kline[7])  # 交易额
                     daily_volumes.append({
                         'date': date,
-                        'date_str': date.strftime('%m-%d'),
-                        'volume': volume
+                        'volume': volume,
+                        'timestamp': timestamp
                     })
                 return daily_volumes
             return []
@@ -276,55 +271,64 @@ class OKXVolumeMonitor:
         else:
             return f"{volume:.2f}"
     
-
+    def create_ascii_trend(self, volumes):
+        """创建ASCII趋势图"""
+        if not volumes or len(volumes) < 2:
+            return ""
+        
+        # 计算变化趋势
+        trend = []
+        for i in range(1, len(volumes)):
+            if volumes[i] > volumes[i-1] * 1.1:  # 增长超过10%
+                trend.append("📈")
+            elif volumes[i] < volumes[i-1] * 0.9:  # 下降超过10%
+                trend.append("📉")
+            else:
+                trend.append("➡️")
+        
+        return " ".join(trend)
     
-    def create_billion_volume_table_fallback(self, billion_alerts):
-        """创建过亿成交额的表格格式消息（回退方案）"""
+    def create_billion_volume_table(self, billion_alerts):
+        """创建过亿成交额的表格格式消息"""
         if not billion_alerts:
             return ""
         
         # 按当天交易额从高到低排序
         billion_alerts.sort(key=lambda x: x['current_daily_volume'], reverse=True)
         
+        # 限制显示数量，避免消息过长
+        max_display = 15
+        if len(billion_alerts) > max_display:
+            billion_alerts = billion_alerts[:max_display]
+            truncated = True
+        else:
+            truncated = False
+        
         content = "## 💰 日成交过亿信号\n\n"
         
-        # 构建表头
-        header = "| 交易对 | 当天成交额 |"
-        separator = "|--------|------------|"
+        # 简化表格，只显示最近3天的数据
+        content += "| 交易对 | 当天 | 昨天 | 前天 | 趋势 |\n"
+        content += "|--------|------|------|------|------|\n"
         
-        # 获取最多的历史天数
-        max_history_days = 0
         for alert in billion_alerts:
-            if alert['daily_volumes_history']:
-                max_history_days = max(max_history_days, len(alert['daily_volumes_history']) - 1)  # 减1因为第一个是当天
-        
-        # 添加历史日期的表头
-        for i in range(1, min(max_history_days + 1, 7)):  # 最多显示过去6天
-            if billion_alerts[0]['daily_volumes_history'] and len(billion_alerts[0]['daily_volumes_history']) > i:
-                date = billion_alerts[0]['daily_volumes_history'][i]['date_str']
-                header += f" {date} |"
-                separator += "--------|"
-        
-        content += header + "\n"
-        content += separator + "\n"
-        
-        # 填充数据
-        for alert in billion_alerts:
-            inst_id = alert['inst_id']
+            inst_id = alert['inst_id'].replace('-SWAP', '')  # 简化显示
             current_vol = self.format_volume(alert['current_daily_volume'])
             
-            row = f"| {inst_id} | **{current_vol}** |"
-            
-            # 添加历史数据
             history = alert['daily_volumes_history']
-            for i in range(1, min(max_history_days + 1, 7)):
-                if history and len(history) > i:
-                    hist_vol = self.format_volume(history[i]['volume'])
-                    row += f" {hist_vol} |"
-                else:
-                    row += " - |"
+            yesterday = self.format_volume(history[1]['volume']) if len(history) > 1 else "-"
+            day_before = self.format_volume(history[2]['volume']) if len(history) > 2 else "-"
             
-            content += row + "\n"
+            # 计算趋势
+            if len(history) >= 3:
+                recent_volumes = [history[2]['volume'], history[1]['volume'], history[0]['volume']]
+                trend = self.create_ascii_trend(recent_volumes)
+            else:
+                trend = "-"
+            
+            content += f"| {inst_id} | **{current_vol}** | {yesterday} | {day_before} | {trend} |\n"
+        
+        if truncated:
+            content += f"\n*注：仅显示前{max_display}个交易对*\n"
         
         content += "\n"
         return content
@@ -342,40 +346,50 @@ class OKXVolumeMonitor:
         hour_alerts.sort(key=lambda x: x['current_volume'], reverse=True)
         four_hour_alerts.sort(key=lambda x: x['current_volume'], reverse=True)
         
+        # 限制显示数量
+        max_display = 10
         content = ""
         
         if hour_alerts:
+            display_alerts = hour_alerts[:max_display]
             content += "## 🔥 1小时爆量信号\n\n"
-            content += "| 交易对 | 当前交易额 | 相比上期 | 相比MA10 | 当天总额 |\n"
-            content += "|--------|------------|----------|----------|----------|\n"
+            content += "| 交易对 | 当前 | 倍数 | 当天 |\n"
+            content += "|--------|------|------|------|\n"
             
-            for alert in hour_alerts:
-                inst_id = alert['inst_id']
+            for alert in display_alerts:
+                inst_id = alert['inst_id'].replace('-SWAP', '')  # 简化显示
                 current_vol = self.format_volume(alert['current_volume'])
                 daily_vol = self.format_volume(alert['daily_volume'])
                 
-                prev_ratio_str = f"{alert['prev_ratio']:.1f}x 📈" if alert['prev_ratio'] else "-"
-                ma10_ratio_str = f"{alert['ma10_ratio']:.1f}x 📈" if alert['ma10_ratio'] else "-"
+                # 显示最高的倍数
+                ratio = max(alert['prev_ratio'] or 0, alert['ma10_ratio'] or 0)
+                ratio_str = f"{ratio:.1f}x" if ratio > 0 else "-"
                 
-                content += f"| {inst_id} | {current_vol} | {prev_ratio_str} | {ma10_ratio_str} | {daily_vol} |\n"
+                content += f"| {inst_id} | {current_vol} | {ratio_str} | {daily_vol} |\n"
             
+            if len(hour_alerts) > max_display:
+                content += f"\n*仅显示前{max_display}个*\n"
             content += "\n"
         
         if four_hour_alerts:
+            display_alerts = four_hour_alerts[:max_display]
             content += "## 🚀 4小时爆量信号\n\n"
-            content += "| 交易对 | 当前交易额 | 相比上期 | 相比MA10 | 当天总额 |\n"
-            content += "|--------|------------|----------|----------|----------|\n"
+            content += "| 交易对 | 当前 | 倍数 | 当天 |\n"
+            content += "|--------|------|------|------|\n"
             
-            for alert in four_hour_alerts:
-                inst_id = alert['inst_id']
+            for alert in display_alerts:
+                inst_id = alert['inst_id'].replace('-SWAP', '')  # 简化显示
                 current_vol = self.format_volume(alert['current_volume'])
                 daily_vol = self.format_volume(alert['daily_volume'])
                 
-                prev_ratio_str = f"{alert['prev_ratio']:.1f}x 📈" if alert['prev_ratio'] else "-"
-                ma10_ratio_str = f"{alert['ma10_ratio']:.1f}x 📈" if alert['ma10_ratio'] else "-"
+                # 显示最高的倍数
+                ratio = max(alert['prev_ratio'] or 0, alert['ma10_ratio'] or 0)
+                ratio_str = f"{ratio:.1f}x" if ratio > 0 else "-"
                 
-                content += f"| {inst_id} | {current_vol} | {prev_ratio_str} | {ma10_ratio_str} | {daily_vol} |\n"
+                content += f"| {inst_id} | {current_vol} | {ratio_str} | {daily_vol} |\n"
             
+            if len(four_hour_alerts) > max_display:
+                content += f"\n*仅显示前{max_display}个*\n"
             content += "\n"
         
         return content
@@ -390,22 +404,16 @@ class OKXVolumeMonitor:
             time_since_alert = datetime.now() - last_alert_datetime
             hours_since = int(time_since_alert.total_seconds() / 3600)
             
-            title = "OKX监控系统心跳 💓"
-            content = f"监控系统正常运行中...\n\n"
-            content += f"📊 监控状态: 正常\n"
-            content += f"📈 监控交易对: {monitored_count} 个\n"
-            content += f"⏰ 检查时间: {current_time}\n"
-            content += f"🔕 距离上次爆量警报: {hours_since} 小时\n"
-            content += f"📅 上次警报时间: {last_alert_datetime.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-            content += f"💡 提示: 已连续 {hours_since} 小时无爆量信号"
+            title = "OKX监控心跳"
+            content = f"系统运行正常\n"
+            content += f"监控: {monitored_count}个\n"
+            content += f"时间: {current_time}\n"
+            content += f"距上次: {hours_since}小时"
         else:
-            title = "OKX监控系统心跳 💓"
-            content = f"监控系统正常运行中...\n\n"
-            content += f"📊 监控状态: 正常\n"
-            content += f"📈 监控交易对: {monitored_count} 个\n"
-            content += f"⏰ 检查时间: {current_time}\n"
-            content += f"🔕 暂无爆量警报记录\n\n"
-            content += f"💡 提示: 系统首次运行或记录文件不存在"
+            title = "OKX监控心跳"
+            content = f"系统运行正常\n"
+            content += f"监控: {monitored_count}个\n"
+            content += f"时间: {current_time}"
         
         success = self.send_notification(title, content)
         if success:
@@ -414,255 +422,58 @@ class OKXVolumeMonitor:
     
     def send_notification(self, title, content):
         """通过Server酱发送微信通知"""
+        if not self.server_jiang_key:
+            print("错误：未设置Server酱密钥")
+            print(f"标题: {title}")
+            print(f"内容预览: {content[:200]}...")
+            return False
+            
         try:
-            url = f"https://sctapi.ftqq.com/{self.server_jiang_key}.send"
+            # Server酱的消息长度限制
+            max_content_length = 30000  # 留些余量
             
-            # 限制内容长度，避免超出Server酱限制
-            max_content_length = 15000  # Server酱内容限制约为20KB，保守设置15KB
+            # 如果内容过长，进行截断
             if len(content) > max_content_length:
-                # 截断内容并添加提示
-                content = content[:max_content_length] + "\n\n... (内容过长已截断)"
-                print(f"警告：通知内容过长，已截断至 {max_content_length} 字符")
+                content = content[:max_content_length] + "\n\n*消息过长已截断*"
             
-            # 限制标题长度
-            max_title_length = 100
-            if len(title) > max_title_length:
-                title = title[:max_title_length]
-                print(f"警告：标题过长，已截断至 {max_title_length} 字符")
-            
-            # 清理内容中可能导致问题的字符
-            content = self._clean_content_for_notification(content)
-            title = self._clean_content_for_notification(title)
-            
+            url = f"https://sctapi.ftqq.com/{self.server_jiang_key}.send"
             data = {
                 'title': title,
                 'desp': content
             }
             
-            # 添加请求头
-            headers = {
-                'Content-Type': 'application/x-www-form-urlencoded; charset=utf-8',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
+            response = requests.post(url, data=data, timeout=30)
             
-            print(f"发送通知 - 标题长度: {len(title)}, 内容长度: {len(content)}")
-            
-            response = requests.post(url, data=data, headers=headers, timeout=30)
-            
-            # 打印详细的响应信息用于调试
-            print(f"响应状态码: {response.status_code}")
-            print(f"响应头: {dict(response.headers)}")
-            
-            if response.status_code != 200:
-                print(f"HTTP错误: {response.status_code}")
-                print(f"响应内容: {response.text}")
-                return False
-            
-            result = response.json()
-            print(f"Server酱响应: {result}")
-            
-            if result.get('code') == 0:
-                print(f"通知发送成功: {title}")
-                return True
+            # 检查响应
+            if response.status_code == 200:
+                result = response.json()
+                if result.get('code') == 0:
+                    print(f"通知发送成功: {title}")
+                    return True
+                else:
+                    print(f"Server酱返回错误: {result}")
+                    return False
             else:
-                print(f"通知发送失败: {result}")
-                # 如果是因为内容过长导致的错误，尝试发送简化版本
-                if 'too long' in str(result).lower() or result.get('code') == 40001:
-                    return self._send_simplified_notification(title)
+                print(f"HTTP错误 {response.status_code}: {response.text}")
                 return False
                 
         except requests.exceptions.RequestException as e:
-            print(f"请求异常: {e}")
+            print(f"发送通知时网络错误: {e}")
             return False
         except Exception as e:
             print(f"发送通知时出错: {e}")
             return False
     
-    def _clean_content_for_notification(self, content):
-        """清理通知内容中可能导致问题的字符"""
-        if not content:
-            return ""
-        
-        # 移除base64图片数据（如果太长的话）
-        import re
-        
-        # 检查是否包含base64图片
-        base64_pattern = r'data:image/png;base64,[A-Za-z0-9+/=]+'
-        base64_matches = re.findall(base64_pattern, content)
-        
-        if base64_matches:
-            for match in base64_matches:
-                if len(match) > 1000:  # 如果base64数据太长
-                    # 替换为占位符
-                    content = content.replace(match, "[图片数据过大，已省略]")
-                    print("检测到大型base64图片数据，已替换为占位符")
-        
-        # 移除可能导致问题的特殊字符
-        content = content.replace('\x00', '')  # 移除空字符
-        
-        return content
-    
-    def _send_simplified_notification(self, original_title):
-        """发送简化版通知（当原通知内容过长时）"""
-        try:
-            simplified_content = f"监控检测到异常信号，详细信息因内容过长无法完整显示。\n\n"
-            simplified_content += f"请检查监控系统获取完整信息。\n"
-            simplified_content += f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-            
-            url = f"https://sctapi.ftqq.com/{self.server_jiang_key}.send"
-            data = {
-                'title': f"{original_title} (简化版)",
-                'desp': simplified_content
-            }
-            
-            headers = {
-                'Content-Type': 'application/x-www-form-urlencoded; charset=utf-8'
-            }
-            
-            response = requests.post(url, data=data, headers=headers, timeout=30)
-            
-            if response.status_code == 200:
-                result = response.json()
-                if result.get('code') == 0:
-                    print("简化版通知发送成功")
-                    return True
-            
-            print("简化版通知发送也失败")
-            return False
-            
-        except Exception as e:
-            print(f"发送简化版通知时出错: {e}")
-            return False
-    
-    def create_billion_volume_chart(self, billion_alerts):
-        """创建过亿成交额的曲线图（优化版本）"""
-        if not billion_alerts:
-            return ""
-        
-        try:
-            # 按当天交易额从高到低排序，取前10个
-            billion_alerts.sort(key=lambda x: x['current_daily_volume'], reverse=True)
-            top_alerts = billion_alerts[:10]  # 最多显示前10个
-            
-            # 设置图表尺寸和样式
-            fig, ax = plt.subplots(figsize=(12, 6))  # 减小图片尺寸
-            fig.patch.set_facecolor('white')
-            
-            colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', 
-                     '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9']
-            
-            max_volume = 0
-            chart_data = []
-            
-            # 准备数据
-            for i, alert in enumerate(top_alerts):
-                history = alert['daily_volumes_history']
-                if not history:
-                    continue
-                    
-                # 按时间排序（从旧到新）
-                history.sort(key=lambda x: x['date'])
-                
-                dates = [item['date'] for item in history]
-                volumes = [item['volume'] / 1_000_000 for item in history]  # 转换为百万为单位
-                
-                max_volume = max(max_volume, max(volumes))
-                
-                chart_data.append({
-                    'inst_id': alert['inst_id'],
-                    'dates': dates,
-                    'volumes': volumes,
-                    'color': colors[i % len(colors)]
-                })
-            
-            # 绘制曲线
-            for data in chart_data:
-                ax.plot(data['dates'], data['volumes'], 
-                       marker='o', linewidth=2, markersize=4,  # 减小标记尺寸
-                       color=data['color'], label=data['inst_id'],
-                       alpha=0.8)
-            
-            # 设置标题和标签
-            ax.set_title('过亿成交额交易对 - 7日趋势', 
-                        fontsize=14, fontweight='bold', pad=15)  # 减小字体
-            ax.set_xlabel('日期', fontsize=10)
-            ax.set_ylabel('交易额 (百万 USDT)', fontsize=10)
-            
-            # 设置日期格式
-            ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))
-            ax.xaxis.set_major_locator(mdates.DayLocator(interval=1))
-            plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, fontsize=8)
-            
-            # 设置网格
-            ax.grid(True, alpha=0.3, linestyle='--')
-            ax.set_facecolor('#FAFAFA')
-            
-            # 设置图例（简化）
-            if len(chart_data) <= 5:
-                ax.legend(fontsize=8, frameon=True)
-            else:
-                # 太多交易对时不显示图例，避免图片过于复杂
-                pass
-            
-            # 添加一亿线参考
-            ax.axhline(y=100, color='red', linestyle='--', alpha=0.6, 
-                      linewidth=1.5, label='1亿USDT基准线')
-            
-            # 优化布局
-            plt.tight_layout()
-            
-            # 保存图片到内存，降低DPI以减小文件大小
-            buffer = BytesIO()
-            plt.savefig(buffer, format='png', dpi=100, bbox_inches='tight',  # 降低DPI
-                       facecolor='white', edgecolor='none', 
-                       optimize=True)  # 优化PNG
-            buffer.seek(0)
-            
-            # 转换为base64
-            image_base64 = base64.b64encode(buffer.getvalue()).decode()
-            plt.close(fig)
-            
-            # 检查base64长度，如果太长则不包含图片
-            if len(image_base64) > 50000:  # 约50KB限制
-                print(f"警告：图片过大({len(image_base64)}字符)，改用表格格式")
-                return self.create_billion_volume_table_fallback(billion_alerts)
-            
-            # 创建带图片的markdown内容
-            content = "## 💰 日成交过亿信号\n\n"
-            
-            # 添加统计信息
-            total_volume = sum(alert['current_daily_volume'] for alert in top_alerts)
-            content += f"**统计**：{len(billion_alerts)}个过亿交易对，总额{self.format_volume(total_volume)}\n\n"
-            
-            # 嵌入base64图片
-            content += f"![趋势图](data:image/png;base64,{image_base64})\n\n"
-            
-            # 添加简化的数据表格
-            content += "**详细数据**：\n\n"
-            content += "| 交易对 | 当日成交额 |\n"
-            content += "|--------|------------|\n"
-            
-            for i, alert in enumerate(top_alerts[:5], 1):  # 只显示前5个
-                inst_id = alert['inst_id']
-                current_vol = self.format_volume(alert['current_daily_volume'])
-                content += f"| {inst_id} | **{current_vol}** |\n"
-            
-            if len(billion_alerts) > 5:
-                content += f"| ... | ... |\n"
-                content += f"| 共{len(billion_alerts)}个 | - |\n"
-            
-            content += "\n"
-            print(f"成功生成过亿成交额曲线图，图片大小：{len(image_base64)}字符")
-            return content
-            
-        except Exception as e:
-            print(f"生成过亿成交额曲线图时出错: {e}")
-            # 如果图表生成失败，回退到表格模式
-            return self.create_billion_volume_table_fallback(billion_alerts)
-    
     def run_monitor(self):
         """运行监控主程序"""
         print(f"开始监控 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        
+        # 检查Server酱密钥
+        if not self.server_jiang_key:
+            print("\n警告：未设置Server酱密钥！")
+            print("请设置环境变量 SERVER_JIANG_KEY")
+            print("例如: export SERVER_JIANG_KEY='你的密钥'")
+            print("\n将以打印模式运行...\n")
         
         # 获取交易对列表
         instruments = self.get_perpetual_instruments()
@@ -704,34 +515,24 @@ class OKXVolumeMonitor:
         if has_any_signal:
             # 构建标题
             if len(all_alerts) > 0 and len(all_billion_alerts) > 0:
-                title = f"🚨 OKX监控 - {len(all_alerts)}个爆量+{len(all_billion_alerts)}个过亿"
+                title = f"OKX {len(all_alerts)}爆量+{len(all_billion_alerts)}过亿"
             elif len(all_alerts) > 0:
-                title = f"🚨 OKX监控 - 发现{len(all_alerts)}个爆量信号"
+                title = f"OKX 发现{len(all_alerts)}个爆量"
             else:
-                title = f"💰 OKX监控 - 发现{len(all_billion_alerts)}个过亿信号"
+                title = f"OKX 发现{len(all_billion_alerts)}个过亿"
             
-            content = f"**监控时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-            content += f"**监控范围**: {len(instruments)} 个交易对\n\n"
+            content = f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            content += f"范围: {len(instruments)}个交易对\n\n"
             
             # 先创建爆量表格
             if all_alerts:
                 table_content = self.create_alert_table(all_alerts)
                 content += table_content
             
-            # 再创建过亿成交额曲线图（替代原来的表格）
+            # 再创建过亿成交额表格（放在最后）
             if all_billion_alerts:
-                billion_chart_content = self.create_billion_volume_chart(all_billion_alerts)
-                content += billion_chart_content
-            
-            # 添加说明
-            content += "---\n\n"
-            content += "**说明**:\n"
-            content += "- **爆量信号**: 1H需10倍增长，4H需5倍增长\n"
-            content += "- **过亿信号**: 当天成交额超过1亿USDT\n"
-            content += "- **相比上期**: 与上一个同周期的交易额对比\n"
-            content += "- **相比MA10**: 与过去10个周期平均值对比\n"
-            content += "- **K/M/B**: 千/百万/十亿 USDT\n"
-            content += "- **曲线图**: 显示过去7天交易额变化趋势"
+                billion_table_content = self.create_billion_volume_table(all_billion_alerts)
+                content += billion_table_content
             
             success = self.send_notification(title, content)
             if success:
@@ -751,5 +552,10 @@ class OKXVolumeMonitor:
         print(f"监控完成 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
 if __name__ == "__main__":
+    # 设置Server酱密钥的方法：
+    # 1. 通过环境变量: export SERVER_JIANG_KEY='你的密钥'
+    # 2. 或者直接在这里设置（不推荐）:
+    # os.environ['SERVER_JIANG_KEY'] = '你的密钥'
+    
     monitor = OKXVolumeMonitor()
     monitor.run_monitor()
