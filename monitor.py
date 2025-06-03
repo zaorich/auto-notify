@@ -463,29 +463,35 @@ class OKXVolumeMonitor:
                 continue
         
         # 发送汇总通知
-        total_signals = len(all_alerts) + len(all_billion_alerts)
+        has_any_signal = len(all_alerts) > 0 or len(all_billion_alerts) > 0
         
-        if total_signals > 0:
-            title = f"🚨 OKX监控 - 发现{total_signals}个信号"
+        if has_any_signal:
+            # 构建标题
+            if len(all_alerts) > 0 and len(all_billion_alerts) > 0:
+                title = f"🚨 OKX监控 - {len(all_alerts)}个爆量+{len(all_billion_alerts)}个过亿"
+            elif len(all_alerts) > 0:
+                title = f"🚨 OKX监控 - 发现{len(all_alerts)}个爆量信号"
+            else:
+                title = f"💰 OKX监控 - 发现{len(all_billion_alerts)}个过亿信号"
             
             content = f"**监控时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
             content += f"**监控范围**: {len(instruments)} 个交易对\n\n"
             
-            # 创建过亿成交额表格
-            if all_billion_alerts:
-                billion_table_content = self.create_billion_volume_table(all_billion_alerts)
-                content += billion_table_content
-            
-            # 创建爆量表格
+            # 先创建爆量表格
             if all_alerts:
                 table_content = self.create_alert_table(all_alerts)
                 content += table_content
             
+            # 再创建过亿成交额表格（放在最后）
+            if all_billion_alerts:
+                billion_table_content = self.create_billion_volume_table(all_billion_alerts)
+                content += billion_table_content
+            
             # 添加说明
             content += "---\n\n"
             content += "**说明**:\n"
-            content += "- **过亿信号**: 当天成交额超过1亿USDT\n"
             content += "- **爆量信号**: 1H需10倍增长，4H需5倍增长\n"
+            content += "- **过亿信号**: 当天成交额超过1亿USDT\n"
             content += "- **相比上期**: 与上一个同周期的交易额对比\n"
             content += "- **相比MA10**: 与过去10个周期平均值对比\n"
             content += "- **K/M/B**: 千/百万/十亿 USDT"
