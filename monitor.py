@@ -104,7 +104,7 @@ class OKXVolumeMonitor:
         with ThreadPoolExecutor(max_workers=10) as executor:
             # 提交所有任务
             future_to_inst = {
-                executor.submit(self.check_volume_explosion, inst['instId']): inst['instId'] 
+                executor.submit(self.check_single_instrument_volume, inst['instId']): inst['instId'] 
                 for inst in instruments_batch
             }
             
