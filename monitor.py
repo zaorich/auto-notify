@@ -12,6 +12,11 @@ import asyncio
 import aiohttp
 from concurrent.futures import ThreadPoolExecutor
 import threading
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+from matplotlib import font_manager
+import io
+import base64
 
 class OKXVolumeMonitor:
     def __init__(self):
@@ -23,6 +28,10 @@ class OKXVolumeMonitor:
         })
         self.heartbeat_file = 'last_alert_time.txt'
         self.heartbeat_interval = 4 * 60 * 60  # 4小时（秒）
+        
+        # 设置matplotlib中文字体
+        plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
+        plt.rcParams['axes.unicode_minus'] = False
         
     def get_perpetual_instruments(self):
         """获取永续合约交易对列表"""
@@ -113,7 +122,8 @@ class OKXVolumeMonitor:
                     volume = float(kline[7])  # 交易额
                     daily_volumes.append({
                         'date': date,
-                        'volume': volume
+                        'volume': volume,
+                        'timestamp': timestamp
                     })
                 return daily_volumes
             return []
@@ -266,6 +276,68 @@ class OKXVolumeMonitor:
         else:
             return f"{volume:.2f}"
     
+    def create_volume_chart(self, billion_alerts):
+        """创建成交量变化曲线图"""
+        if not billion_alerts:
+            return None
+        
+        # 限制最多显示10个交易对，避免图表过于拥挤
+        top_alerts = sorted(billion_alerts, key=lambda x: x['current_daily_volume'], reverse=True)[:10]
+        
+        plt.figure(figsize=(12, 8))
+        
+        # 为每个交易对绘制曲线
+        for alert in top_alerts:
+            inst_id = alert['inst_id'].replace('-SWAP', '')  # 简化显示
+            history = alert['daily_volumes_history']
+            
+            if history and len(history) > 1:
+                # 准备数据
+                dates = []
+                volumes = []
+                
+                # 按时间排序（从远到近）
+                sorted_history = sorted(history, key=lambda x: x['timestamp'])
+                
+                for item in sorted_history:
+                    dates.append(datetime.fromtimestamp(item['timestamp']))
+                    volumes.append(item['volume'] / 1_000_000)  # 转换为百万
+                
+                # 绘制曲线
+                plt.plot(dates, volumes, marker='o', linewidth=2, markersize=6, label=inst_id)
+        
+        # 设置图表属性
+        plt.title('Daily Trading Volume Trend (Past 7 Days)', fontsize=16, pad=20)
+        plt.xlabel('Date', fontsize=12)
+        plt.ylabel('Volume (Million USDT)', fontsize=12)
+        
+        # 设置日期格式
+        ax = plt.gca()
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))
+        ax.xaxis.set_major_locator(mdates.DayLocator())
+        plt.xticks(rotation=45)
+        
+        # 添加网格
+        plt.grid(True, alpha=0.3, linestyle='--')
+        
+        # 添加图例
+        plt.legend(loc='upper left', bbox_to_anchor=(1.05, 1), borderaxespad=0.)
+        
+        # 设置y轴从0开始
+        plt.ylim(bottom=0)
+        
+        # 调整布局
+        plt.tight_layout()
+        
+        # 将图表转换为base64字符串
+        buffer = io.BytesIO()
+        plt.savefig(buffer, format='png', dpi=150, bbox_inches='tight')
+        buffer.seek(0)
+        image_base64 = base64.b64encode(buffer.read()).decode()
+        plt.close()
+        
+        return image_base64
+    
     def create_billion_volume_table(self, billion_alerts):
         """创建过亿成交额的表格格式消息"""
         if not billion_alerts:
@@ -315,6 +387,13 @@ class OKXVolumeMonitor:
             content += row + "\n"
         
         content += "\n"
+        
+        # 添加成交量曲线图
+        chart_base64 = self.create_volume_chart(billion_alerts)
+        if chart_base64:
+            content += "### 📈 成交量变化趋势\n\n"
+            content += f"![成交量变化曲线](data:image/png;base64,{chart_base64})\n\n"
+        
         return content
     
     def create_alert_table(self, alerts):
