@@ -444,7 +444,7 @@ class OKXVolumeMonitor:
             # 将SVG包装在代码块中
             content += "svg\n"
             content += "\n".join(svg_lines)
-            content += "\n
+            content += "\n"
     
     def create_alert_table(self, alerts):
         """创建爆量警报的表格格式消息"""
