@@ -99,9 +99,32 @@ class OKXVolumeMonitor:
         
         return prev_ratio, ma10_ratio
     
+    def get_daily_volumes_history(self, inst_id, days=7):
+        """获取交易对过去N天的日交易额历史"""
+        try:
+            # 获取日K线数据
+            daily_klines = self.get_kline_data(inst_id, '1D', days)
+            if daily_klines:
+                # 返回每天的交易额列表，按时间从近到远排序
+                daily_volumes = []
+                for kline in daily_klines:
+                    timestamp = int(kline[0]) / 1000  # 转换为秒
+                    date = datetime.fromtimestamp(timestamp).strftime('%m-%d')
+                    volume = float(kline[7])  # 交易额
+                    daily_volumes.append({
+                        'date': date,
+                        'volume': volume
+                    })
+                return daily_volumes
+            return []
+        except Exception as e:
+            print(f"获取{inst_id}历史日交易额时出错: {e}")
+            return []
+    
     def check_volume_explosion_batch(self, instruments_batch):
         """批量检查多个交易对的爆量情况"""
         alerts = []
+        billion_volume_alerts = []
         
         with ThreadPoolExecutor(max_workers=10) as executor:
             # 提交所有任务
@@ -114,15 +137,18 @@ class OKXVolumeMonitor:
             for future in future_to_inst:
                 inst_id = future_to_inst[future]
                 try:
-                    inst_alerts = future.result(timeout=30)  # 30秒超时
+                    inst_alerts, billion_alert = future.result(timeout=30)  # 30秒超时
                     if inst_alerts:
                         alerts.extend(inst_alerts)
                         print(f"发现爆量: {inst_id}")
+                    if billion_alert:
+                        billion_volume_alerts.append(billion_alert)
+                        print(f"发现过亿成交: {inst_id}")
                 except Exception as e:
                     print(f"检查 {inst_id} 时出错: {e}")
                     continue
         
-        return alerts
+        return alerts, billion_volume_alerts
     
     def get_daily_volume(self, inst_id):
         """获取交易对当天的交易额"""
@@ -139,12 +165,23 @@ class OKXVolumeMonitor:
             return 0
     
     def check_single_instrument_volume(self, inst_id):
-        """检查单个交易对是否出现爆量"""
+        """检查单个交易对是否出现爆量和过亿成交"""
         alerts = []
+        billion_alert = None
         
         try:
             # 获取当天交易额
             daily_volume = self.get_daily_volume(inst_id)
+            
+            # 检查是否过亿
+            if daily_volume >= 100_000_000:  # 1亿USDT
+                # 获取过去7天的日交易额历史
+                daily_volumes_history = self.get_daily_volumes_history(inst_id, 7)
+                billion_alert = {
+                    'inst_id': inst_id,
+                    'current_daily_volume': daily_volume,
+                    'daily_volumes_history': daily_volumes_history
+                }
             
             # 检查1小时爆量
             hour_data = self.get_kline_data(inst_id, '1H', 20)
@@ -184,11 +221,11 @@ class OKXVolumeMonitor:
                         }
                         alerts.append(alert_data)
             
-            return alerts
+            return alerts, billion_alert
             
         except Exception as e:
             print(f"检查 {inst_id} 时出错: {e}")
-            return []
+            return [], None
     
     def get_last_alert_time(self):
         """获取上次发送爆量警报的时间"""
@@ -228,6 +265,57 @@ class OKXVolumeMonitor:
             return f"{volume/1_000:.2f}K"
         else:
             return f"{volume:.2f}"
+    
+    def create_billion_volume_table(self, billion_alerts):
+        """创建过亿成交额的表格格式消息"""
+        if not billion_alerts:
+            return ""
+        
+        # 按当天交易额从高到低排序
+        billion_alerts.sort(key=lambda x: x['current_daily_volume'], reverse=True)
+        
+        content = "## 💰 日成交过亿信号\n\n"
+        
+        # 构建表头
+        header = "| 交易对 | 当天成交额 |"
+        separator = "|--------|------------|"
+        
+        # 获取最多的历史天数
+        max_history_days = 0
+        for alert in billion_alerts:
+            if alert['daily_volumes_history']:
+                max_history_days = max(max_history_days, len(alert['daily_volumes_history']) - 1)  # 减1因为第一个是当天
+        
+        # 添加历史日期的表头
+        for i in range(1, min(max_history_days + 1, 7)):  # 最多显示过去6天
+            if billion_alerts[0]['daily_volumes_history'] and len(billion_alerts[0]['daily_volumes_history']) > i:
+                date = billion_alerts[0]['daily_volumes_history'][i]['date']
+                header += f" {date} |"
+                separator += "--------|"
+        
+        content += header + "\n"
+        content += separator + "\n"
+        
+        # 填充数据
+        for alert in billion_alerts:
+            inst_id = alert['inst_id']
+            current_vol = self.format_volume(alert['current_daily_volume'])
+            
+            row = f"| {inst_id} | **{current_vol}** |"
+            
+            # 添加历史数据
+            history = alert['daily_volumes_history']
+            for i in range(1, min(max_history_days + 1, 7)):
+                if history and len(history) > i:
+                    hist_vol = self.format_volume(history[i]['volume'])
+                    row += f" {hist_vol} |"
+                else:
+                    row += " - |"
+            
+            content += row + "\n"
+        
+        content += "\n"
+        return content
     
     def create_alert_table(self, alerts):
         """创建爆量警报的表格格式消息"""
@@ -352,6 +440,7 @@ class OKXVolumeMonitor:
         print(f"开始监控所有 {len(instruments)} 个交易对，分 {total_batches} 批处理")
         
         all_alerts = []
+        all_billion_alerts = []
         
         # 分批处理交易对
         for batch_num in range(0, len(instruments), batch_size):
@@ -361,8 +450,9 @@ class OKXVolumeMonitor:
             print(f"处理第 {batch_index}/{total_batches} 批 ({len(batch)} 个交易对)")
             
             try:
-                batch_alerts = self.check_volume_explosion_batch(batch)
+                batch_alerts, batch_billion_alerts = self.check_volume_explosion_batch(batch)
                 all_alerts.extend(batch_alerts)
+                all_billion_alerts.extend(batch_billion_alerts)
                 
                 # 批次间添加短暂延迟
                 if batch_index < total_batches:
@@ -373,30 +463,39 @@ class OKXVolumeMonitor:
                 continue
         
         # 发送汇总通知
-        if all_alerts:
-            title = f"🚨 OKX爆量监控 - 发现{len(all_alerts)}个信号"
+        total_signals = len(all_alerts) + len(all_billion_alerts)
+        
+        if total_signals > 0:
+            title = f"🚨 OKX监控 - 发现{total_signals}个信号"
             
-            content = f"监控时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-            content += f"监控范围: {len(instruments)} 个交易对\n\n"
+            content = f"**监控时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            content += f"**监控范围**: {len(instruments)} 个交易对\n\n"
             
-            # 创建表格格式的警报信息
-            table_content = self.create_alert_table(all_alerts)
-            content += table_content
+            # 创建过亿成交额表格
+            if all_billion_alerts:
+                billion_table_content = self.create_billion_volume_table(all_billion_alerts)
+                content += billion_table_content
+            
+            # 创建爆量表格
+            if all_alerts:
+                table_content = self.create_alert_table(all_alerts)
+                content += table_content
             
             # 添加说明
             content += "---\n\n"
-            content += "说明:\n"
-            content += "- 相比上期: 与上一个同周期的交易额对比\n"
-            content += "- 相比MA10: 与过去10个周期平均值对比\n"
-            content += "- 当天总额: 过去24小时总交易额\n"
-            content += "- K/M/B: 千/百万/十亿 USDT"
+            content += "**说明**:\n"
+            content += "- **过亿信号**: 当天成交额超过1亿USDT\n"
+            content += "- **爆量信号**: 1H需10倍增长，4H需5倍增长\n"
+            content += "- **相比上期**: 与上一个同周期的交易额对比\n"
+            content += "- **相比MA10**: 与过去10个周期平均值对比\n"
+            content += "- **K/M/B**: 千/百万/十亿 USDT"
             
             success = self.send_notification(title, content)
             if success:
                 # 更新上次发送爆量警报的时间
                 self.update_last_alert_time()
         else:
-            print("未发现爆量情况")
+            print("未发现爆量或过亿成交情况")
             
             # 检查是否需要发送心跳消息
             if self.should_send_heartbeat():
