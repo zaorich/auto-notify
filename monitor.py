@@ -540,7 +540,7 @@ class OKXVolumeMonitor:
         return success
     
     def send_notification(self, title, content):
-        # """通过Server酱发送微信通知"""
+        """通过Server酱发送微信通知"""
         try:
             url = f"https://sctapi.ftqq.com/{self.server_jiang_key}.send"
             
@@ -604,6 +604,188 @@ class OKXVolumeMonitor:
         except Exception as e:
             print(f"发送通知时出错: {e}")
             return False
+    
+    def _clean_content_for_notification(self, content):
+        """清理通知内容中可能导致问题的字符"""
+        if not content:
+            return ""
+        
+        # 移除base64图片数据（如果太长的话）
+        import re
+        
+        # 检查是否包含base64图片
+        base64_pattern = r'data:image/png;base64,[A-Za-z0-9+/=]+'
+        base64_matches = re.findall(base64_pattern, content)
+        
+        if base64_matches:
+            for match in base64_matches:
+                if len(match) > 1000:  # 如果base64数据太长
+                    # 替换为占位符
+                    content = content.replace(match, "[图片数据过大，已省略]")
+                    print("检测到大型base64图片数据，已替换为占位符")
+        
+        # 移除可能导致问题的特殊字符
+        content = content.replace('\x00', '')  # 移除空字符
+        
+        return content
+    
+    def _send_simplified_notification(self, original_title):
+        """发送简化版通知（当原通知内容过长时）"""
+        try:
+            simplified_content = f"监控检测到异常信号，详细信息因内容过长无法完整显示。\n\n"
+            simplified_content += f"请检查监控系统获取完整信息。\n"
+            simplified_content += f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            
+            url = f"https://sctapi.ftqq.com/{self.server_jiang_key}.send"
+            data = {
+                'title': f"{original_title} (简化版)",
+                'desp': simplified_content
+            }
+            
+            headers = {
+                'Content-Type': 'application/x-www-form-urlencoded; charset=utf-8'
+            }
+            
+            response = requests.post(url, data=data, headers=headers, timeout=30)
+            
+            if response.status_code == 200:
+                result = response.json()
+                if result.get('code') == 0:
+                    print("简化版通知发送成功")
+                    return True
+            
+            print("简化版通知发送也失败")
+            return False
+            
+        except Exception as e:
+            print(f"发送简化版通知时出错: {e}")
+            return False
+    
+    def create_billion_volume_chart(self, billion_alerts):
+        """创建过亿成交额的曲线图（优化版本）"""
+        if not billion_alerts:
+            return ""
+        
+        try:
+            # 按当天交易额从高到低排序，取前10个
+            billion_alerts.sort(key=lambda x: x['current_daily_volume'], reverse=True)
+            top_alerts = billion_alerts[:10]  # 最多显示前10个
+            
+            # 设置图表尺寸和样式
+            fig, ax = plt.subplots(figsize=(12, 6))  # 减小图片尺寸
+            fig.patch.set_facecolor('white')
+            
+            colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', 
+                     '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9']
+            
+            max_volume = 0
+            chart_data = []
+            
+            # 准备数据
+            for i, alert in enumerate(top_alerts):
+                history = alert['daily_volumes_history']
+                if not history:
+                    continue
+                    
+                # 按时间排序（从旧到新）
+                history.sort(key=lambda x: x['date'])
+                
+                dates = [item['date'] for item in history]
+                volumes = [item['volume'] / 1_000_000 for item in history]  # 转换为百万为单位
+                
+                max_volume = max(max_volume, max(volumes))
+                
+                chart_data.append({
+                    'inst_id': alert['inst_id'],
+                    'dates': dates,
+                    'volumes': volumes,
+                    'color': colors[i % len(colors)]
+                })
+            
+            # 绘制曲线
+            for data in chart_data:
+                ax.plot(data['dates'], data['volumes'], 
+                       marker='o', linewidth=2, markersize=4,  # 减小标记尺寸
+                       color=data['color'], label=data['inst_id'],
+                       alpha=0.8)
+            
+            # 设置标题和标签
+            ax.set_title('过亿成交额交易对 - 7日趋势', 
+                        fontsize=14, fontweight='bold', pad=15)  # 减小字体
+            ax.set_xlabel('日期', fontsize=10)
+            ax.set_ylabel('交易额 (百万 USDT)', fontsize=10)
+            
+            # 设置日期格式
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))
+            ax.xaxis.set_major_locator(mdates.DayLocator(interval=1))
+            plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, fontsize=8)
+            
+            # 设置网格
+            ax.grid(True, alpha=0.3, linestyle='--')
+            ax.set_facecolor('#FAFAFA')
+            
+            # 设置图例（简化）
+            if len(chart_data) <= 5:
+                ax.legend(fontsize=8, frameon=True)
+            else:
+                # 太多交易对时不显示图例，避免图片过于复杂
+                pass
+            
+            # 添加一亿线参考
+            ax.axhline(y=100, color='red', linestyle='--', alpha=0.6, 
+                      linewidth=1.5, label='1亿USDT基准线')
+            
+            # 优化布局
+            plt.tight_layout()
+            
+            # 保存图片到内存，降低DPI以减小文件大小
+            buffer = BytesIO()
+            plt.savefig(buffer, format='png', dpi=100, bbox_inches='tight',  # 降低DPI
+                       facecolor='white', edgecolor='none', 
+                       optimize=True)  # 优化PNG
+            buffer.seek(0)
+            
+            # 转换为base64
+            image_base64 = base64.b64encode(buffer.getvalue()).decode()
+            plt.close(fig)
+            
+            # 检查base64长度，如果太长则不包含图片
+            if len(image_base64) > 50000:  # 约50KB限制
+                print(f"警告：图片过大({len(image_base64)}字符)，改用表格格式")
+                return self.create_billion_volume_table_fallback(billion_alerts)
+            
+            # 创建带图片的markdown内容
+            content = "## 💰 日成交过亿信号\n\n"
+            
+            # 添加统计信息
+            total_volume = sum(alert['current_daily_volume'] for alert in top_alerts)
+            content += f"**统计**：{len(billion_alerts)}个过亿交易对，总额{self.format_volume(total_volume)}\n\n"
+            
+            # 嵌入base64图片
+            content += f"![趋势图](data:image/png;base64,{image_base64})\n\n"
+            
+            # 添加简化的数据表格
+            content += "**详细数据**：\n\n"
+            content += "| 交易对 | 当日成交额 |\n"
+            content += "|--------|------------|\n"
+            
+            for i, alert in enumerate(top_alerts[:5], 1):  # 只显示前5个
+                inst_id = alert['inst_id']
+                current_vol = self.format_volume(alert['current_daily_volume'])
+                content += f"| {inst_id} | **{current_vol}** |\n"
+            
+            if len(billion_alerts) > 5:
+                content += f"| ... | ... |\n"
+                content += f"| 共{len(billion_alerts)}个 | - |\n"
+            
+            content += "\n"
+            print(f"成功生成过亿成交额曲线图，图片大小：{len(image_base64)}字符")
+            return content
+            
+        except Exception as e:
+            print(f"生成过亿成交额曲线图时出错: {e}")
+            # 如果图表生成失败，回退到表格模式
+            return self.create_billion_volume_table_fallback(billion_alerts)
     
     def run_monitor(self):
         """运行监控主程序"""
