@@ -336,7 +336,7 @@ class OKXVolumeMonitor:
     def create_alert_table(self, alerts):
         """创建爆量警报的表格格式消息"""
         if not alerts:
-        return ""
+            return ""
         
         # 按时间框架分组
         hour_alerts = [alert for alert in alerts if alert['timeframe'] == '1H']
