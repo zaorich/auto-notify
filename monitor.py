@@ -123,6 +123,7 @@ class OKXVolumeMonitor:
                     continue
         
         return alerts
+    
     def get_daily_volume(self, inst_id):
         """获取交易对当天的交易额"""
         try:
@@ -136,6 +137,7 @@ class OKXVolumeMonitor:
         except Exception as e:
             print(f"获取{inst_id}当天交易额时出错: {e}")
             return 0
+    
     def check_single_instrument_volume(self, inst_id):
         """检查单个交易对是否出现爆量"""
         alerts = []
@@ -227,17 +229,18 @@ class OKXVolumeMonitor:
         else:
             return f"{volume:.2f}"
     
-      def create_alert_table(self, alerts):
+    def create_alert_table(self, alerts):
         """创建爆量警报的表格格式消息"""
         if not alerts:
             return ""
         
-        # **按当前交易额从高到低排序**
-        alerts_sorted = sorted(alerts, key=lambda x: x['current_volume'], reverse=True)
-        
         # 按时间框架分组
-        hour_alerts = [alert for alert in alerts_sorted if alert['timeframe'] == '1H']
-        four_hour_alerts = [alert for alert in alerts_sorted if alert['timeframe'] == '4H']
+        hour_alerts = [alert for alert in alerts if alert['timeframe'] == '1H']
+        four_hour_alerts = [alert for alert in alerts if alert['timeframe'] == '4H']
+        
+        # 按当前交易额从高到低排序
+        hour_alerts.sort(key=lambda x: x['current_volume'], reverse=True)
+        four_hour_alerts.sort(key=lambda x: x['current_volume'], reverse=True)
         
         content = ""
         
@@ -276,7 +279,8 @@ class OKXVolumeMonitor:
             content += "\n"
         
         return content
-
+    
+    def send_heartbeat_notification(self, monitored_count):
         """发送心跳监测消息"""
         current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         last_alert_time = self.get_last_alert_time()
@@ -307,6 +311,7 @@ class OKXVolumeMonitor:
         if success:
             print("心跳消息发送成功")
         return success
+    
     def send_notification(self, title, content):
         """通过Server酱发送微信通知"""
         try:
@@ -371,8 +376,8 @@ class OKXVolumeMonitor:
         if all_alerts:
             title = f"🚨 OKX爆量监控 - 发现{len(all_alerts)}个信号"
             
-            content = f"**监控时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-            content += f"**监控范围**: {len(instruments)} 个交易对\n\n"
+            content = f"监控时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            content += f"监控范围: {len(instruments)} 个交易对\n\n"
             
             # 创建表格格式的警报信息
             table_content = self.create_alert_table(all_alerts)
@@ -380,11 +385,11 @@ class OKXVolumeMonitor:
             
             # 添加说明
             content += "---\n\n"
-            content += "**说明**:\n"
-            content += "- **相比上期**: 与上一个同周期的交易额对比\n"
-            content += "- **相比MA10**: 与过去10个周期平均值对比\n"
-            content += "- **当天总额**: 过去24小时总交易额\n"
-            content += "- **K/M/B**: 千/百万/十亿 USDT"
+            content += "说明:\n"
+            content += "- 相比上期: 与上一个同周期的交易额对比\n"
+            content += "- 相比MA10: 与过去10个周期平均值对比\n"
+            content += "- 当天总额: 过去24小时总交易额\n"
+            content += "- K/M/B: 千/百万/十亿 USDT"
             
             success = self.send_notification(title, content)
             if success:
