@@ -376,7 +376,7 @@ class OKXVolumeMonitor:
             
             # 嵌入base64图片
             content += f"![过亿成交额趋势图](data:image/png;base64,{image_base64})\n\n"
-            
+            print(f"![过亿成交额趋势图](data:image/png;base64,{image_base64})\n\n")
             # 添加详细数据表格（简化版）
             content += "**详细数据**：\n\n"
             content += "| 排名 | 交易对 | 当日成交额 | 7日最高 | 7日最低 |\n"
