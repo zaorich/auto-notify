@@ -116,18 +116,34 @@ class OKXVolumeMonitor:
                 try:
                     inst_alerts = future.result(timeout=30)  # 30秒超时
                     if inst_alerts:
-                        alerts.extend([(inst_id, timeframe, msg) for timeframe, msg in inst_alerts])
+                        alerts.extend(inst_alerts)
                         print(f"发现爆量: {inst_id}")
                 except Exception as e:
                     print(f"检查 {inst_id} 时出错: {e}")
                     continue
         
         return alerts
+    def get_daily_volume(self, inst_id):
+        """获取交易对当天的交易额"""
+        try:
+            # 获取24小时的1小时K线数据
+            daily_data = self.get_kline_data(inst_id, '1H', 24)
+            if daily_data:
+                # 计算当天总交易额（所有小时K线的交易额之和）
+                total_volume = sum(float(candle[7]) for candle in daily_data)
+                return total_volume
+            return 0
+        except Exception as e:
+            print(f"获取{inst_id}当天交易额时出错: {e}")
+            return 0
     def check_single_instrument_volume(self, inst_id):
         """检查单个交易对是否出现爆量"""
         alerts = []
         
         try:
+            # 获取当天交易额
+            daily_volume = self.get_daily_volume(inst_id)
+            
             # 检查1小时爆量
             hour_data = self.get_kline_data(inst_id, '1H', 20)
             if hour_data:
@@ -137,13 +153,15 @@ class OKXVolumeMonitor:
                     
                     # 小时爆量标准：10倍
                     if prev_ratio >= 10 or ma10_ratio >= 10:
-                        alert_msg = f"🚨 {inst_id} 小时爆量警报！\n"
-                        alert_msg += f"当前小时交易额: {current_volume:,.2f} USDT\n"
-                        if prev_ratio >= 10:
-                            alert_msg += f"相比上小时: {prev_ratio:.1f}倍 📈\n"
-                        if ma10_ratio >= 10:
-                            alert_msg += f"相比MA10: {ma10_ratio:.1f}倍 📈"
-                        alerts.append(('1H', alert_msg))
+                        alert_data = {
+                            'inst_id': inst_id,
+                            'timeframe': '1H',
+                            'current_volume': current_volume,
+                            'prev_ratio': prev_ratio if prev_ratio >= 10 else None,
+                            'ma10_ratio': ma10_ratio if ma10_ratio >= 10 else None,
+                            'daily_volume': daily_volume
+                        }
+                        alerts.append(alert_data)
             
             # 检查4小时爆量
             four_hour_data = self.get_kline_data(inst_id, '4H', 20)
@@ -154,13 +172,15 @@ class OKXVolumeMonitor:
                     
                     # 4小时爆量标准：5倍
                     if prev_ratio >= 5 or ma10_ratio >= 5:
-                        alert_msg = f"🚨 {inst_id} 4小时爆量警报！\n"
-                        alert_msg += f"当前4小时交易额: {current_volume:,.2f} USDT\n"
-                        if prev_ratio >= 5:
-                            alert_msg += f"相比上个4小时: {prev_ratio:.1f}倍 📈\n"
-                        if ma10_ratio >= 5:
-                            alert_msg += f"相比MA10: {ma10_ratio:.1f}倍 📈"
-                        alerts.append(('4H', alert_msg))
+                        alert_data = {
+                            'inst_id': inst_id,
+                            'timeframe': '4H',
+                            'current_volume': current_volume,
+                            'prev_ratio': prev_ratio if prev_ratio >= 5 else None,
+                            'ma10_ratio': ma10_ratio if ma10_ratio >= 5 else None,
+                            'daily_volume': daily_volume
+                        }
+                        alerts.append(alert_data)
             
             return alerts
             
@@ -196,7 +216,63 @@ class OKXVolumeMonitor:
         
         return time_since_last_alert >= self.heartbeat_interval
     
-    def send_heartbeat_notification(self, monitored_count):
+    def format_volume(self, volume):
+        """格式化交易额显示"""
+        if volume >= 1_000_000_000:  # 10亿
+            return f"{volume/1_000_000_000:.2f}B"
+        elif volume >= 1_000_000:  # 100万
+            return f"{volume/1_000_000:.2f}M"
+        elif volume >= 1_000:  # 1千
+            return f"{volume/1_000:.2f}K"
+        else:
+            return f"{volume:.2f}"
+    
+    def create_alert_table(self, alerts):
+        """创建爆量警报的表格格式消息"""
+        if not alerts:
+            return ""
+        
+        # 按时间框架分组
+        hour_alerts = [alert for alert in alerts if alert['timeframe'] == '1H']
+        four_hour_alerts = [alert for alert in alerts if alert['timeframe'] == '4H']
+        
+        content = ""
+        
+        if hour_alerts:
+            content += "## 🔥 1小时爆量信号\n\n"
+            content += "| 交易对 | 当前交易额 | 相比上期 | 相比MA10 | 当天总额 |\n"
+            content += "|--------|------------|----------|----------|----------|\n"
+            
+            for alert in hour_alerts:
+                inst_id = alert['inst_id']
+                current_vol = self.format_volume(alert['current_volume'])
+                daily_vol = self.format_volume(alert['daily_volume'])
+                
+                prev_ratio_str = f"{alert['prev_ratio']:.1f}x 📈" if alert['prev_ratio'] else "-"
+                ma10_ratio_str = f"{alert['ma10_ratio']:.1f}x 📈" if alert['ma10_ratio'] else "-"
+                
+                content += f"| {inst_id} | {current_vol} | {prev_ratio_str} | {ma10_ratio_str} | {daily_vol} |\n"
+            
+            content += "\n"
+        
+        if four_hour_alerts:
+            content += "## 🚀 4小时爆量信号\n\n"
+            content += "| 交易对 | 当前交易额 | 相比上期 | 相比MA10 | 当天总额 |\n"
+            content += "|--------|------------|----------|----------|----------|\n"
+            
+            for alert in four_hour_alerts:
+                inst_id = alert['inst_id']
+                current_vol = self.format_volume(alert['current_volume'])
+                daily_vol = self.format_volume(alert['daily_volume'])
+                
+                prev_ratio_str = f"{alert['prev_ratio']:.1f}x 📈" if alert['prev_ratio'] else "-"
+                ma10_ratio_str = f"{alert['ma10_ratio']:.1f}x 📈" if alert['ma10_ratio'] else "-"
+                
+                content += f"| {inst_id} | {current_vol} | {prev_ratio_str} | {ma10_ratio_str} | {daily_vol} |\n"
+            
+            content += "\n"
+        
+        return content
         """发送心跳监测消息"""
         current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         last_alert_time = self.get_last_alert_time()
@@ -289,13 +365,22 @@ class OKXVolumeMonitor:
         
         # 发送汇总通知
         if all_alerts:
-            title = f"OKX爆量监控 - 发现{len(all_alerts)}个爆量信号"
-            content = f"监控时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-            content += f"监控范围: {len(instruments)} 个交易对\n\n"
+            title = f"🚨 OKX爆量监控 - 发现{len(all_alerts)}个信号"
             
-            for inst_id, timeframe, msg in all_alerts:
-                content += f"{msg}\n\n"
-                content += "---\n\n"
+            content = f"**监控时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            content += f"**监控范围**: {len(instruments)} 个交易对\n\n"
+            
+            # 创建表格格式的警报信息
+            table_content = self.create_alert_table(all_alerts)
+            content += table_content
+            
+            # 添加说明
+            content += "---\n\n"
+            content += "**说明**:\n"
+            content += "- **相比上期**: 与上一个同周期的交易额对比\n"
+            content += "- **相比MA10**: 与过去10个周期平均值对比\n"
+            content += "- **当天总额**: 过去24小时总交易额\n"
+            content += "- **K/M/B**: 千/百万/十亿 USDT"
             
             success = self.send_notification(title, content)
             if success:
