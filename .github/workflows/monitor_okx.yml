@@ -19,12 +19,18 @@ jobs:
       with:
         python-version: '3.9'
         
-    - name: Install dependencies
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3-matplotlib
+        
+    - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install requests pandas numpy aiohttp
+        pip install requests pandas numpy aiohttp matplotlib
         
     - name: Run volume monitor
       run: python monitor.py
       env:
         SERVER_JIANG_KEY: SCT281228TBF1BQU3KUJ4vLRkykhzIE80e
+        MPLBACKEND: Agg  # 设置matplotlib使用非交互式后端
