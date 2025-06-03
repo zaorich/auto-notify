@@ -335,116 +335,116 @@ class OKXVolumeMonitor:
 
 
     def create_billion_volume_chart(self, billion_alerts):
-    """创建过亿成交额的折线图"""
-    if not billion_alerts:
-        return ""
-    
-    # 按当天交易额从高到低排序
-    billion_alerts.sort(key=lambda x: x['current_daily_volume'], reverse=True)
-    
-    content = "## 💰 日成交过亿信号\n\n"
-    
-    # 为每个交易对生成一个折线图
-    for alert in billion_alerts:
-        inst_id = alert['inst_id']
-        current_vol = self.format_volume(alert['current_daily_volume'])
+        # """创建过亿成交额的折线图"""
+        if not billion_alerts:
+            return ""
         
-        # 准备数据
-        history = alert['daily_volumes_history']
-        if not history:
-            continue
+        # 按当天交易额从高到低排序
+        billion_alerts.sort(key=lambda x: x['current_daily_volume'], reverse=True)
+        
+        content = "## 💰 日成交过亿信号\n\n"
+        
+        # 为每个交易对生成一个折线图
+        for alert in billion_alerts:
+            inst_id = alert['inst_id']
+            current_vol = self.format_volume(alert['current_daily_volume'])
             
-        # 获取最近7天的数据
-        days_data = history[:7]
-        days_data.reverse()  # 反转使时间从左到右
-        
-        # 提取日期和数值
-        dates = [d['date'] for d in days_data]
-        values = [d['volume'] for d in days_data]
-        
-        # 创建SVG折线图
-        svg_width = 500
-        svg_height = 200
-        margin = {'top': 20, 'right': 40, 'bottom': 40, 'left': 80}
-        chart_width = svg_width - margin['left'] - margin['right']
-        chart_height = svg_height - margin['top'] - margin['bottom']
-        
-        # 计算Y轴范围
-        max_value = max(values) * 1.1  # 留10%空间
-        min_value = 0
-        
-        # 开始构建SVG字符串
-        svg_lines = []
-        svg_lines.append(f'<svg width="{svg_width}" height="{svg_height}" xmlns="http://www.w3.org/2000/svg">')
-        
-        # 背景
-        svg_lines.append(f'  <rect width="{svg_width}" height="{svg_height}" fill="#f8f9fa"/>')
-        
-        # 标题
-        svg_lines.append(f'  <text x="{svg_width/2}" y="15" text-anchor="middle" font-size="14" font-weight="bold" fill="#333">')
-        svg_lines.append(f'    {inst_id} - 当前: {current_vol}')
-        svg_lines.append('  </text>')
-        
-        # 图表区域背景
-        svg_lines.append(f'  <rect x="{margin["left"]}" y="{margin["top"]}" width="{chart_width}" height="{chart_height}" fill="white" stroke="#e0e0e0" stroke-width="1"/>')
-        
-        # 网格线
-        svg_lines.append('  <g stroke="#f0f0f0" stroke-width="1">')
-        for i in range(5):
-            y = margin['top'] + (chart_height * i / 4)
-            svg_lines.append(f'    <line x1="{margin["left"]}" y1="{y}" x2="{margin["left"] + chart_width}" y2="{y}"/>')
-        svg_lines.append('  </g>')
-        
-        # Y轴标签
-        svg_lines.append('  <!-- Y轴标签 -->')
-        for i in range(5):
-            y = margin['top'] + (chart_height * i / 4)
-            value = max_value - (max_value * i / 4)
-            label = self.format_volume(value)
-            svg_lines.append(f'  <text x="{margin["left"] - 10}" y="{y + 5}" text-anchor="end" font-size="11" fill="#666">{label}</text>')
-        
-        # X轴标签
-        svg_lines.append('  <!-- X轴标签 -->')
-        x_step = chart_width / (len(dates) - 1) if len(dates) > 1 else chart_width
-        for i, date in enumerate(dates):
-            x = margin['left'] + (i * x_step)
-            y = margin['top'] + chart_height + 20
-            svg_lines.append(f'  <text x="{x}" y="{y}" text-anchor="middle" font-size="11" fill="#666">{date}</text>')
-        
-        # 数据点和折线
-        points = []
-        for i, value in enumerate(values):
-            x = margin['left'] + (i * x_step)
-            y = margin['top'] + chart_height - (value / max_value * chart_height)
-            points.append(f"{x},{y}")
-        
-        # 绘制折线
-        svg_lines.append('  <!-- 折线 -->')
-        svg_lines.append(f'  <polyline points="{" ".join(points)}" fill="none" stroke="#1890ff" stroke-width="2"/>')
-        
-        # 绘制数据点
-        svg_lines.append('  <!-- 数据点 -->')
-        for i, value in enumerate(values):
-            x = margin['left'] + (i * x_step)
-            y = margin['top'] + chart_height - (value / max_value * chart_height)
+            # 准备数据
+            history = alert['daily_volumes_history']
+            if not history:
+                continue
+                
+            # 获取最近7天的数据
+            days_data = history[:7]
+            days_data.reverse()  # 反转使时间从左到右
             
-            # 最后一个点（当天）用不同颜色标记
-            color = "#ff4d4f" if i == len(values) - 1 else "#1890ff"
-            radius = "4" if i == len(values) - 1 else "3"
+            # 提取日期和数值
+            dates = [d['date'] for d in days_data]
+            values = [d['volume'] for d in days_data]
             
-            svg_lines.append(f'  <circle cx="{x}" cy="{y}" r="{radius}" fill="{color}" stroke="white" stroke-width="1"/>')
+            # 创建SVG折线图
+            svg_width = 500
+            svg_height = 200
+            margin = {'top': 20, 'right': 40, 'bottom': 40, 'left': 80}
+            chart_width = svg_width - margin['left'] - margin['right']
+            chart_height = svg_height - margin['top'] - margin['bottom']
             
-            # 显示数值
-            label = self.format_volume(value)
-            y_offset = -10 if y > margin['top'] + 20 else 15
-            svg_lines.append(f'  <text x="{x}" y="{y + y_offset}" text-anchor="middle" font-size="10" fill="#333">{label}</text>')
-        
-        svg_lines.append('</svg>')
-        
-        # 将SVG包装在代码块中
-        content += "svg\n"
-        content += "\n".join(svg_lines)
-        content += "\n
+            # 计算Y轴范围
+            max_value = max(values) * 1.1  # 留10%空间
+            min_value = 0
+            
+            # 开始构建SVG字符串
+            svg_lines = []
+            svg_lines.append(f'<svg width="{svg_width}" height="{svg_height}" xmlns="http://www.w3.org/2000/svg">')
+            
+            # 背景
+            svg_lines.append(f'  <rect width="{svg_width}" height="{svg_height}" fill="#f8f9fa"/>')
+            
+            # 标题
+            svg_lines.append(f'  <text x="{svg_width/2}" y="15" text-anchor="middle" font-size="14" font-weight="bold" fill="#333">')
+            svg_lines.append(f'    {inst_id} - 当前: {current_vol}')
+            svg_lines.append('  </text>')
+            
+            # 图表区域背景
+            svg_lines.append(f'  <rect x="{margin["left"]}" y="{margin["top"]}" width="{chart_width}" height="{chart_height}" fill="white" stroke="#e0e0e0" stroke-width="1"/>')
+            
+            # 网格线
+            svg_lines.append('  <g stroke="#f0f0f0" stroke-width="1">')
+            for i in range(5):
+                y = margin['top'] + (chart_height * i / 4)
+                svg_lines.append(f'    <line x1="{margin["left"]}" y1="{y}" x2="{margin["left"] + chart_width}" y2="{y}"/>')
+            svg_lines.append('  </g>')
+            
+            # Y轴标签
+            svg_lines.append('  <!-- Y轴标签 -->')
+            for i in range(5):
+                y = margin['top'] + (chart_height * i / 4)
+                value = max_value - (max_value * i / 4)
+                label = self.format_volume(value)
+                svg_lines.append(f'  <text x="{margin["left"] - 10}" y="{y + 5}" text-anchor="end" font-size="11" fill="#666">{label}</text>')
+            
+            # X轴标签
+            svg_lines.append('  <!-- X轴标签 -->')
+            x_step = chart_width / (len(dates) - 1) if len(dates) > 1 else chart_width
+            for i, date in enumerate(dates):
+                x = margin['left'] + (i * x_step)
+                y = margin['top'] + chart_height + 20
+                svg_lines.append(f'  <text x="{x}" y="{y}" text-anchor="middle" font-size="11" fill="#666">{date}</text>')
+            
+            # 数据点和折线
+            points = []
+            for i, value in enumerate(values):
+                x = margin['left'] + (i * x_step)
+                y = margin['top'] + chart_height - (value / max_value * chart_height)
+                points.append(f"{x},{y}")
+            
+            # 绘制折线
+            svg_lines.append('  <!-- 折线 -->')
+            svg_lines.append(f'  <polyline points="{" ".join(points)}" fill="none" stroke="#1890ff" stroke-width="2"/>')
+            
+            # 绘制数据点
+            svg_lines.append('  <!-- 数据点 -->')
+            for i, value in enumerate(values):
+                x = margin['left'] + (i * x_step)
+                y = margin['top'] + chart_height - (value / max_value * chart_height)
+                
+                # 最后一个点（当天）用不同颜色标记
+                color = "#ff4d4f" if i == len(values) - 1 else "#1890ff"
+                radius = "4" if i == len(values) - 1 else "3"
+                
+                svg_lines.append(f'  <circle cx="{x}" cy="{y}" r="{radius}" fill="{color}" stroke="white" stroke-width="1"/>')
+                
+                # 显示数值
+                label = self.format_volume(value)
+                y_offset = -10 if y > margin['top'] + 20 else 15
+                svg_lines.append(f'  <text x="{x}" y="{y + y_offset}" text-anchor="middle" font-size="10" fill="#333">{label}</text>')
+            
+            svg_lines.append('</svg>')
+            
+            # 将SVG包装在代码块中
+            content += "svg\n"
+            content += "\n".join(svg_lines)
+            content += "\n
     
     def create_alert_table(self, alerts):
         """创建爆量警报的表格格式消息"""
