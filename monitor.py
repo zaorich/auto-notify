@@ -8,6 +8,10 @@ import os
 from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
+import asyncio
+import aiohttp
+from concurrent.futures import ThreadPoolExecutor
+import threading
 
 class OKXVolumeMonitor:
     def __init__(self):
@@ -93,45 +97,74 @@ class OKXVolumeMonitor:
         
         return prev_ratio, ma10_ratio
     
-    def check_volume_explosion(self, inst_id):
-        """检查是否出现爆量"""
+    def check_volume_explosion_batch(self, instruments_batch):
+        """批量检查多个交易对的爆量情况"""
         alerts = []
         
-        # 检查1小时爆量
-        hour_data = self.get_kline_data(inst_id, '1H', 20)
-        if hour_data:
-            prev_ratio, ma10_ratio = self.calculate_volume_ratio(hour_data)
-            if prev_ratio and ma10_ratio:
-                current_volume = float(hour_data[0][7])
-                
-                # 小时爆量标准：10倍
-                if prev_ratio >= 10 or ma10_ratio >= 10:
-                    alert_msg = f"🚨 {inst_id} 小时爆量警报！\n"
-                    alert_msg += f"当前小时交易额: {current_volume:,.2f} USDT\n"
-                    if prev_ratio >= 10:
-                        alert_msg += f"相比上小时: {prev_ratio:.1f}倍 📈\n"
-                    if ma10_ratio >= 10:
-                        alert_msg += f"相比MA10: {ma10_ratio:.1f}倍 📈"
-                    alerts.append(('1H', alert_msg))
-        
-        # 检查4小时爆量
-        four_hour_data = self.get_kline_data(inst_id, '4H', 20)
-        if four_hour_data:
-            prev_ratio, ma10_ratio = self.calculate_volume_ratio(four_hour_data)
-            if prev_ratio and ma10_ratio:
-                current_volume = float(four_hour_data[0][7])
-                
-                # 4小时爆量标准：5倍
-                if prev_ratio >= 5 or ma10_ratio >= 5:
-                    alert_msg = f"🚨 {inst_id} 4小时爆量警报！\n"
-                    alert_msg += f"当前4小时交易额: {current_volume:,.2f} USDT\n"
-                    if prev_ratio >= 5:
-                        alert_msg += f"相比上个4小时: {prev_ratio:.1f}倍 📈\n"
-                    if ma10_ratio >= 5:
-                        alert_msg += f"相比MA10: {ma10_ratio:.1f}倍 📈"
-                    alerts.append(('4H', alert_msg))
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            # 提交所有任务
+            future_to_inst = {
+                executor.submit(self.check_volume_explosion, inst['instId']): inst['instId'] 
+                for inst in instruments_batch
+            }
+            
+            # 收集结果
+            for future in future_to_inst:
+                inst_id = future_to_inst[future]
+                try:
+                    inst_alerts = future.result(timeout=30)  # 30秒超时
+                    if inst_alerts:
+                        alerts.extend([(inst_id, timeframe, msg) for timeframe, msg in inst_alerts])
+                        print(f"发现爆量: {inst_id}")
+                except Exception as e:
+                    print(f"检查 {inst_id} 时出错: {e}")
+                    continue
         
         return alerts
+    def check_single_instrument_volume(self, inst_id):
+        """检查单个交易对是否出现爆量"""
+        alerts = []
+        
+        try:
+            # 检查1小时爆量
+            hour_data = self.get_kline_data(inst_id, '1H', 20)
+            if hour_data:
+                prev_ratio, ma10_ratio = self.calculate_volume_ratio(hour_data)
+                if prev_ratio and ma10_ratio:
+                    current_volume = float(hour_data[0][7])
+                    
+                    # 小时爆量标准：10倍
+                    if prev_ratio >= 10 or ma10_ratio >= 10:
+                        alert_msg = f"🚨 {inst_id} 小时爆量警报！\n"
+                        alert_msg += f"当前小时交易额: {current_volume:,.2f} USDT\n"
+                        if prev_ratio >= 10:
+                            alert_msg += f"相比上小时: {prev_ratio:.1f}倍 📈\n"
+                        if ma10_ratio >= 10:
+                            alert_msg += f"相比MA10: {ma10_ratio:.1f}倍 📈"
+                        alerts.append(('1H', alert_msg))
+            
+            # 检查4小时爆量
+            four_hour_data = self.get_kline_data(inst_id, '4H', 20)
+            if four_hour_data:
+                prev_ratio, ma10_ratio = self.calculate_volume_ratio(four_hour_data)
+                if prev_ratio and ma10_ratio:
+                    current_volume = float(four_hour_data[0][7])
+                    
+                    # 4小时爆量标准：5倍
+                    if prev_ratio >= 5 or ma10_ratio >= 5:
+                        alert_msg = f"🚨 {inst_id} 4小时爆量警报！\n"
+                        alert_msg += f"当前4小时交易额: {current_volume:,.2f} USDT\n"
+                        if prev_ratio >= 5:
+                            alert_msg += f"相比上个4小时: {prev_ratio:.1f}倍 📈\n"
+                        if ma10_ratio >= 5:
+                            alert_msg += f"相比MA10: {ma10_ratio:.1f}倍 📈"
+                        alerts.append(('4H', alert_msg))
+            
+            return alerts
+            
+        except Exception as e:
+            print(f"检查 {inst_id} 时出错: {e}")
+            return []
     
     def send_notification(self, title, content):
         """通过Server酱发送微信通知"""
@@ -167,32 +200,37 @@ class OKXVolumeMonitor:
             print("未能获取交易对列表，退出监控")
             return
         
-        # 监控所有活跃的交易对
-        print(f"开始监控所有 {len(instruments)} 个交易对")
+        # 监控所有活跃的交易对，分批处理
+        batch_size = 10
+        total_batches = (len(instruments) + batch_size - 1) // batch_size
+        print(f"开始监控所有 {len(instruments)} 个交易对，分 {total_batches} 批处理")
         
         all_alerts = []
         
-        for i, instrument in enumerate(instruments):
-            inst_id = instrument['instId']
-            print(f"检查 {inst_id} ({i+1}/{len(instruments)})")
+        # 分批处理交易对
+        for batch_num in range(0, len(instruments), batch_size):
+            batch = instruments[batch_num:batch_num + batch_size]
+            batch_index = batch_num // batch_size + 1
+            
+            print(f"处理第 {batch_index}/{total_batches} 批 ({len(batch)} 个交易对)")
             
             try:
-                alerts = self.check_volume_explosion(inst_id)
-                if alerts:
-                    all_alerts.extend([(inst_id, timeframe, msg) for timeframe, msg in alerts])
-                    print(f"发现爆量: {inst_id}")
+                batch_alerts = self.check_volume_explosion_batch(batch)
+                all_alerts.extend(batch_alerts)
                 
-                # 添加延迟避免请求过快，监控所有交易对需要更多延迟
-                time.sleep(1)
-                
+                # 批次间添加短暂延迟
+                if batch_index < total_batches:
+                    time.sleep(2)
+                    
             except Exception as e:
-                print(f"检查 {inst_id} 时出错: {e}")
+                print(f"处理第 {batch_index} 批时出错: {e}")
                 continue
         
         # 发送汇总通知
         if all_alerts:
             title = f"OKX爆量监控 - 发现{len(all_alerts)}个爆量信号"
-            content = f"监控时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            content = f"监控时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            content += f"监控范围: {len(instruments)} 个交易对\n\n"
             
             for inst_id, timeframe, msg in all_alerts:
                 content += f"{msg}\n\n"
