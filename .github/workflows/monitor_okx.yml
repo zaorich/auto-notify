@@ -13,15 +13,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         
-      - name: Cache apt packages
-        uses: actions/cache@v3
-        with:
-          path: /var/cache/apt
-          key: ${{ runner.os }}-apt-${{ hashFiles('**/apt-packages.txt') }}
-        
-      - name: Install system dependencies
-        run: sudo apt-get install -y python3-matplotlib
-        
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
@@ -30,19 +21,17 @@ jobs:
       - name: Cache pip dependencies
         uses: actions/cache@v3
         with:
-          path: |
-            ~/.cache/pip
-            venv/
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/setup.py') }}
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
           
-      - name: Create and activate venv
+      - name: Install system dependencies
         run: |
-          python -m venv venv
-          source venv/bin/activate
+          sudo apt-get update
+          sudo apt-get install -y python3-matplotlib
           
       - name: Install Python dependencies
         run: |
-          pip install --upgrade pip
+          python -m pip install --upgrade pip
           pip install requests pandas numpy aiohttp matplotlib
           
       - name: Run volume monitor
