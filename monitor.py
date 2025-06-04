@@ -376,13 +376,14 @@ class OKXVolumeMonitor:
             print(f"[{self.get_current_time_str()}] 生成图表URL时出错: {e}")
             return None
     
-    def generate_trend_chart_url(self, billion_alerts):
-        """生成趋势图表URL（显示历史对比）"""
+
+    def generate_trend_chart_urls(self, billion_alerts):
+        """生成多个趋势图表URL（每5个币种一个图）"""
         if not billion_alerts or len(billion_alerts) == 0:
-            return None
+            return []
         
         try:
-            # 过滤掉BTC和ETH交易对（修改过滤逻辑）
+            # 过滤掉BTC和ETH交易对
             filtered_alerts = []
             for alert in billion_alerts:
                 inst_name = alert['inst_id'].replace('-SWAP', '').replace('-USDT', '')
@@ -391,7 +392,7 @@ class OKXVolumeMonitor:
             
             if not filtered_alerts:
                 print(f"[{self.get_current_time_str()}] 过滤BTC和ETH后，没有交易对可显示趋势图")
-                return None
+                return []
             
             # 获取所有可用的日期
             all_dates = set()
@@ -403,8 +404,8 @@ class OKXVolumeMonitor:
             # 按日期排序
             sorted_dates = sorted(list(all_dates))[-7:]  # 最近7天
             
-            # 为每个交易对准备数据
-            datasets = []
+            # 按每5个币种分组
+            chart_urls = []
             colors = [
                 '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF',
                 '#FF9F40', '#FF6384', '#C9CBCF', '#FF5733', '#33FF57',
@@ -412,82 +413,88 @@ class OKXVolumeMonitor:
                 '#FF8C33', '#8C33FF', '#33FF8C', '#FF3333', '#3333FF'
             ]
             
-            for i, alert in enumerate(filtered_alerts):
-                # 修改过滤逻辑
-                inst_name = alert['inst_id'].replace('-SWAP', '').replace('-USDT', '')
-                data = []
+            # 每5个币种生成一个图表
+            for group_index in range(0, len(filtered_alerts), 5):
+                group = filtered_alerts[group_index:group_index + 5]
+                datasets = []
                 
-                # 创建日期到成交额的映射
-                volume_map = {}
-                if alert['daily_volumes_history']:
-                    for vol_data in alert['daily_volumes_history']:
-                        volume_map[vol_data['date']] = vol_data['volume']
+                # 为当前组的每个交易对准备数据
+                for i, alert in enumerate(group):
+                    inst_name = alert['inst_id'].replace('-SWAP', '').replace('-USDT', '')
+                    data = []
+                    
+                    # 创建日期到成交额的映射
+                    volume_map = {}
+                    if alert['daily_volumes_history']:
+                        for vol_data in alert['daily_volumes_history']:
+                            volume_map[vol_data['date']] = vol_data['volume']
+                    
+                    # 按排序后的日期填充数据
+                    for date in sorted_dates:
+                        volume = volume_map.get(date, 0)
+                        data.append(round(volume / 1_000_000, 1))  # 转换为百万
+                    
+                    datasets.append({
+                        "label": inst_name,
+                        "data": data,
+                        "borderColor": colors[i % len(colors)],
+                        "backgroundColor": colors[i % len(colors)] + "20",  # 添加透明度
+                        "fill": False,
+                        "tension": 0.4
+                    })
                 
-                # 按排序后的日期填充数据
-                for date in sorted_dates:
-                    volume = volume_map.get(date, 0)
-                    data.append(round(volume / 1_000_000, 1))  # 转换为百万
-                
-                datasets.append({
-                    "label": inst_name,
-                    "data": data,
-                    "borderColor": colors[i % len(colors)],
-                    "backgroundColor": colors[i % len(colors)] + "20",  # 添加透明度
-                    "fill": False,
-                    "tension": 0.4
-                })
-            
-            chart_config = {
-                "type": "line",
-                "data": {
-                    "labels": sorted_dates,
-                    "datasets": datasets
-                },
-                "options": {
-                    "responsive": True,
-                    "maintainAspectRatio": False,
-                    "plugins": {
-                        "title": {
-                            "display": True,
-                            "text": "OKX 成交额趋势对比 (排除BTC/ETH)",
-                            "font": {
-                                "size": 16,
-                                "weight": "bold"
-                            }
-                        },
-                        "legend": {
-                            "display": True,
-                            "position": "top"
-                        }
+                chart_config = {
+                    "type": "line",
+                    "data": {
+                        "labels": sorted_dates,
+                        "datasets": datasets
                     },
-                    "scales": {
-                        "y": {
-                            "beginAtZero": True,
+                    "options": {
+                        "responsive": True,
+                        "maintainAspectRatio": False,
+                        "plugins": {
                             "title": {
                                 "display": True,
-                                "text": "成交额 (百万USDT)"
+                                "text": f"OKX 成交额趋势对比 第{group_index//5 + 1}组 (排除BTC/ETH)",
+                                "font": {
+                                    "size": 16,
+                                    "weight": "bold"
+                                }
+                            },
+                            "legend": {
+                                "display": True,
+                                "position": "top"
                             }
                         },
-                        "x": {
-                            "title": {
-                                "display": True,
-                                "text": "日期"
+                        "scales": {
+                            "y": {
+                                "beginAtZero": True,
+                                "title": {
+                                    "display": True,
+                                    "text": "成交额 (百万USDT)"
+                                }
+                            },
+                            "x": {
+                                "title": {
+                                    "display": True,
+                                    "text": "日期"
+                                }
                             }
                         }
                     }
                 }
-            }
+                
+                chart_json = json.dumps(chart_config)
+                encoded_chart = urllib.parse.quote(chart_json)
+                chart_url = f"https://quickchart.io/chart?c={encoded_chart}&width=800&height=400&format=png"
+                chart_urls.append(chart_url)
             
-            chart_json = json.dumps(chart_config)
-            encoded_chart = urllib.parse.quote(chart_json)
-            chart_url = f"https://quickchart.io/chart?c={encoded_chart}&width=800&height=400&format=png"
-            
-            print(f"[{self.get_current_time_str()}] 生成趋势图表URL成功，包含 {len(filtered_alerts)} 个交易对（已排除BTC/ETH）")
-            return chart_url
+            print(f"[{self.get_current_time_str()}] 生成{len(chart_urls)}个趋势图表URL，总共包含 {len(filtered_alerts)} 个交易对（已排除BTC/ETH）")
+            return chart_urls
             
         except Exception as e:
             print(f"[{self.get_current_time_str()}] 生成趋势图表URL时出错: {e}")
-            return None
+            return []
     
     def create_billion_volume_table(self, billion_alerts):
         """创建过亿成交额的表格格式消息"""
@@ -501,16 +508,17 @@ class OKXVolumeMonitor:
         
         # 生成图表
         chart_url = self.generate_chart_url_quickchart(billion_alerts)
-        trend_chart_url = self.generate_trend_chart_url(billion_alerts)
+        trend_chart_urls = self.generate_trend_chart_urls(billion_alerts)  # 改为复数
         
         # 添加图表
         if chart_url:
             content += f"### 📊 成交额排行图\n"
             content += f"![成交额排行]({chart_url})\n\n"
         
-        if trend_chart_url:
+        if trend_chart_urls:
             content += f"### 📈 成交额趋势图\n"
-            content += f"![成交额趋势]({trend_chart_url})\n\n"
+            for i, trend_url in enumerate(trend_chart_urls):
+                content += f"![成交额趋势第{i+1}组]({trend_url})\n\n"
         
         # 构建表头
         header = "### 📋 详细数据表格\n\n"
