@@ -755,8 +755,8 @@ class OKXVolumeMonitor:
                 
                 # 批次间添加更长延迟2秒
                 if batch_index < total_batches:
-                    print(f"[{self.get_current_time_str()}] 批次间等待3秒...")
-                    time.sleep(3)
+                    print(f"[{self.get_current_time_str()}] 批次间等待2秒...")
+                    time.sleep(2)
                     
             except Exception as e:
                 print(f"[{self.get_current_time_str()}] 处理第 {batch_index} 批时出错: {e}")
