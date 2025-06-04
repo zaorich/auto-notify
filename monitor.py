@@ -723,7 +723,7 @@ class OKXVolumeMonitor:
             print(f"[{self.get_current_time_str()}] 发送通知时出错: {e}")
             return False
     
-     def run_monitor(self):
+    def run_monitor(self):
         """运行监控主程序（修改版本）"""
         print(f"[{self.get_current_time_str()}] 开始监控")
         
