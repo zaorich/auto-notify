@@ -2,7 +2,8 @@ name: OKX Volume Monitor
 
 on:
   schedule:
-    - cron: '*/30 * * * *'
+    # 每小时的第0、20、40分钟各运行一次（例如 12:00, 12:20, 12:40）
+    - cron: '0,20,40 * * * *'
   workflow_dispatch:
 
 jobs:
