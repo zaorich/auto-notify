@@ -29,6 +29,8 @@ class OKXVolumeMonitor:
         self.heartbeat_interval = 4 * 60 * 60  # 4小时（秒）
         # 设置UTC+8时区
         self.timezone = pytz.timezone('Asia/Shanghai')
+        # 新增：图表分组配置
+        self.chart_group_size = 3  # 每3个币种一个图，可配置
         
     def get_current_time_str(self):
         """获取当前UTC+8时间字符串"""
@@ -108,6 +110,9 @@ class OKXVolumeMonitor:
         ma10_ratio = current_volume / ma10_volume if ma10_volume > 0 else 0
         
         return prev_ratio, ma10_ratio
+
+
+
     
     def get_daily_volumes_history(self, inst_id, days=7):
         """获取交易对过去N天的日交易额历史"""
@@ -183,6 +188,9 @@ class OKXVolumeMonitor:
             # 获取当天交易额（通过get_daily_volume方法，即24小时内1小时K线的volCcyQuote字段之和）
             daily_volume = self.get_daily_volume(inst_id)
             
+            # 获取过去3天的交易额数据（用于表格显示）
+            past_3days_volumes = self.get_daily_volumes_history(inst_id, 3)
+            
             # 检查是否过亿
             if daily_volume >= 100_000_000:  # 1亿USDT
                 # 获取过去7天的日交易额历史
@@ -209,7 +217,8 @@ class OKXVolumeMonitor:
                             'current_volume': current_volume,  # 来自最新1小时K线的volCcyQuote字段
                             'prev_ratio': prev_ratio if prev_ratio >= 10 else None,
                             'ma10_ratio': ma10_ratio if ma10_ratio >= 10 else None,
-                            'daily_volume': daily_volume  # 来自get_daily_volume方法（24小时内所有1小时K线volCcyQuote之和）
+                            'daily_volume': daily_volume,  # 来自get_daily_volume方法（24小时内所有1小时K线volCcyQuote之和）
+                            'past_3days_volumes': past_3days_volumes  # 新增：过去3天交易额
                         }
                         alerts.append(alert_data)
                         
@@ -235,7 +244,8 @@ class OKXVolumeMonitor:
                             'current_volume': current_volume,  # 来自最新4小时K线的volCcyQuote字段
                             'prev_ratio': prev_ratio if prev_ratio >= 5 else None,
                             'ma10_ratio': ma10_ratio if ma10_ratio >= 5 else None,
-                            'daily_volume': daily_volume  # 来自get_daily_volume方法（24小时内所有1小时K线volCcyQuote之和）
+                            'daily_volume': daily_volume,  # 来自get_daily_volume方法（24小时内所有1小时K线volCcyQuote之和）
+                            'past_3days_volumes': past_3days_volumes  # 新增：过去3天交易额
                         }
                         alerts.append(alert_data)
                         
@@ -250,6 +260,7 @@ class OKXVolumeMonitor:
         except Exception as e:
             print(f"[{self.get_current_time_str()}] 检查 {inst_id} 时出错: {e}")
             return [], None
+
     
     def get_last_alert_time(self):
         """获取上次发送爆量警报的时间"""
@@ -378,7 +389,7 @@ class OKXVolumeMonitor:
     
 
     def generate_trend_chart_urls(self, billion_alerts):
-        """生成多个趋势图表URL（每5个币种一个图）"""
+        """生成多个趋势图表URL（每N个币种一个图，N可配置）"""
         if not billion_alerts or len(billion_alerts) == 0:
             return []
         
@@ -404,7 +415,7 @@ class OKXVolumeMonitor:
             # 按日期排序
             sorted_dates = sorted(list(all_dates))[-7:]  # 最近7天
             
-            # 按每5个币种分组
+            # 按每N个币种分组（使用可配置的分组大小）
             chart_urls = []
             colors = [
                 '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF',
@@ -413,9 +424,9 @@ class OKXVolumeMonitor:
                 '#FF8C33', '#8C33FF', '#33FF8C', '#FF3333', '#3333FF'
             ]
             
-            # 每5个币种生成一个图表
-            for group_index in range(0, len(filtered_alerts), 5):
-                group = filtered_alerts[group_index:group_index + 5]
+            # 每N个币种生成一个图表
+            for group_index in range(0, len(filtered_alerts), self.chart_group_size):
+                group = filtered_alerts[group_index:group_index + self.chart_group_size]
                 datasets = []
                 
                 # 为当前组的每个交易对准备数据
@@ -455,7 +466,7 @@ class OKXVolumeMonitor:
                         "plugins": {
                             "title": {
                                 "display": True,
-                                "text": f"OKX 成交额趋势对比 第{group_index//5 + 1}组 (排除BTC/ETH)",
+                                "text": f"OKX 成交额趋势对比 第{group_index//self.chart_group_size + 1}组 (排除BTC/ETH)",
                                 "font": {
                                     "size": 16,
                                     "weight": "bold"
@@ -489,7 +500,7 @@ class OKXVolumeMonitor:
                 chart_url = f"https://quickchart.io/chart?c={encoded_chart}&width=800&height=400&format=png"
                 chart_urls.append(chart_url)
             
-            print(f"[{self.get_current_time_str()}] 生成{len(chart_urls)}个趋势图表URL，总共包含 {len(filtered_alerts)} 个交易对（已排除BTC/ETH）")
+            print(f"[{self.get_current_time_str()}] 生成{len(chart_urls)}个趋势图表URL，每{self.chart_group_size}个币种一组，总共包含 {len(filtered_alerts)} 个交易对（已排除BTC/ETH）")
             return chart_urls
             
         except Exception as e:
@@ -579,8 +590,8 @@ class OKXVolumeMonitor:
         
         if hour_alerts:
             content += "## 🔥 1小时爆量信号\n\n"
-            content += "| 交易对 | 当前交易额 | 相比上期 | 相比MA10 | 当天总额 |\n"
-            content += "|--------|------------|----------|----------|----------|\n"
+            content += "| 交易对 | 当前交易额 | 相比上期 | 相比MA10 | 当天总额 | 昨天 | 前天 | 3天前 |\n"
+            content += "|--------|------------|----------|----------|----------|------|------|------|\n"
             
             for alert in hour_alerts:
                 inst_id = alert['inst_id']
@@ -590,14 +601,20 @@ class OKXVolumeMonitor:
                 prev_ratio_str = f"{alert['prev_ratio']:.1f}x 📈" if alert['prev_ratio'] else "-"
                 ma10_ratio_str = f"{alert['ma10_ratio']:.1f}x 📈" if alert['ma10_ratio'] else "-"
                 
-                content += f"| {inst_id} | {current_vol} | {prev_ratio_str} | {ma10_ratio_str} | {daily_vol} |\n"
+                # 获取过去3天的交易额数据
+                past_volumes = alert.get('past_3days_volumes', [])
+                day1_vol = self.format_volume(past_volumes[0]['volume']) if len(past_volumes) > 0 else "-"
+                day2_vol = self.format_volume(past_volumes[1]['volume']) if len(past_volumes) > 1 else "-"
+                day3_vol = self.format_volume(past_volumes[2]['volume']) if len(past_volumes) > 2 else "-"
+                
+                content += f"| {inst_id} | {current_vol} | {prev_ratio_str} | {ma10_ratio_str} | {daily_vol} | {day1_vol} | {day2_vol} | {day3_vol} |\n"
             
             content += "\n"
         
         if four_hour_alerts:
             content += "## 🚀 4小时爆量信号\n\n"
-            content += "| 交易对 | 当前交易额 | 相比上期 | 相比MA10 | 当天总额 |\n"
-            content += "|--------|------------|----------|----------|----------|\n"
+            content += "| 交易对 | 当前交易额 | 相比上期 | 相比MA10 | 当天总额 | 昨天 | 前天 | 3天前 |\n"
+            content += "|--------|------------|----------|----------|----------|------|------|------|\n"
             
             for alert in four_hour_alerts:
                 inst_id = alert['inst_id']
@@ -607,7 +624,13 @@ class OKXVolumeMonitor:
                 prev_ratio_str = f"{alert['prev_ratio']:.1f}x 📈" if alert['prev_ratio'] else "-"
                 ma10_ratio_str = f"{alert['ma10_ratio']:.1f}x 📈" if alert['ma10_ratio'] else "-"
                 
-                content += f"| {inst_id} | {current_vol} | {prev_ratio_str} | {ma10_ratio_str} | {daily_vol} |\n"
+                # 获取过去3天的交易额数据
+                past_volumes = alert.get('past_3days_volumes', [])
+                day1_vol = self.format_volume(past_volumes[0]['volume']) if len(past_volumes) > 0 else "-"
+                day2_vol = self.format_volume(past_volumes[1]['volume']) if len(past_volumes) > 1 else "-"
+                day3_vol = self.format_volume(past_volumes[2]['volume']) if len(past_volumes) > 2 else "-"
+                
+                content += f"| {inst_id} | {current_vol} | {prev_ratio_str} | {ma10_ratio_str} | {daily_vol} | {day1_vol} | {day2_vol} | {day3_vol} |\n"
             
             content += "\n"
         
