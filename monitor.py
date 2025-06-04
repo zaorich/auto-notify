@@ -12,6 +12,9 @@ import asyncio
 import aiohttp
 from concurrent.futures import ThreadPoolExecutor
 import threading
+import urllib.parse
+from io import BytesIO
+import base64
 
 class OKXVolumeMonitor:
     def __init__(self):
@@ -266,6 +269,189 @@ class OKXVolumeMonitor:
         else:
             return f"{volume:.2f}"
     
+    def generate_chart_url_quickchart(self, billion_alerts):
+        """使用QuickChart生成图表URL"""
+        if not billion_alerts or len(billion_alerts) == 0:
+            return None
+        
+        try:
+            # 限制显示前8个交易对，避免图表过于拥挤
+            top_alerts = billion_alerts[:8]
+            
+            # 准备数据
+            labels = []
+            current_data = []
+            colors = [
+                '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0',
+                '#9966FF', '#FF9F40', '#FF6384', '#C9CBCF'
+            ]
+            
+            for i, alert in enumerate(top_alerts):
+                inst_name = alert['inst_id'].replace('-SWAP', '').replace('USDT', '')
+                labels.append(inst_name)
+                current_data.append(round(alert['current_daily_volume'] / 1_000_000, 1))  # 转换为百万
+            
+            # 构建Chart.js配置
+            chart_config = {
+                "type": "bar",
+                "data": {
+                    "labels": labels,
+                    "datasets": [{
+                        "label": "当天成交额 (百万USDT)",
+                        "data": current_data,
+                        "backgroundColor": colors[:len(top_alerts)],
+                        "borderColor": colors[:len(top_alerts)],
+                        "borderWidth": 1
+                    }]
+                },
+                "options": {
+                    "responsive": True,
+                    "maintainAspectRatio": False,
+                    "plugins": {
+                        "title": {
+                            "display": True,
+                            "text": "OKX 过亿成交额排行",
+                            "font": {
+                                "size": 16,
+                                "weight": "bold"
+                            }
+                        },
+                        "legend": {
+                            "display": True,
+                            "position": "top"
+                        }
+                    },
+                    "scales": {
+                        "y": {
+                            "beginAtZero": True,
+                            "title": {
+                                "display": True,
+                                "text": "成交额 (百万USDT)"
+                            }
+                        },
+                        "x": {
+                            "title": {
+                                "display": True,
+                                "text": "交易对"
+                            }
+                        }
+                    }
+                }
+            }
+            
+            # 将配置转换为JSON字符串并编码
+            chart_json = json.dumps(chart_config)
+            encoded_chart = urllib.parse.quote(chart_json)
+            
+            # 生成QuickChart URL
+            chart_url = f"https://quickchart.io/chart?c={encoded_chart}&width=800&height=400&format=png"
+            
+            print(f"生成图表URL成功，包含 {len(top_alerts)} 个交易对")
+            return chart_url
+            
+        except Exception as e:
+            print(f"生成图表URL时出错: {e}")
+            return None
+    
+    def generate_trend_chart_url(self, billion_alerts):
+        """生成趋势图表URL（显示历史对比）"""
+        if not billion_alerts or len(billion_alerts) == 0:
+            return None
+        
+        try:
+            # 选择前5个交易对显示趋势
+            top_alerts = billion_alerts[:5]
+            
+            # 获取所有可用的日期
+            all_dates = set()
+            for alert in top_alerts:
+                if alert['daily_volumes_history']:
+                    for vol_data in alert['daily_volumes_history']:
+                        all_dates.add(vol_data['date'])
+            
+            # 按日期排序
+            sorted_dates = sorted(list(all_dates))[-7:]  # 最近7天
+            
+            # 为每个交易对准备数据
+            datasets = []
+            colors = ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF']
+            
+            for i, alert in enumerate(top_alerts):
+                inst_name = alert['inst_id'].replace('-SWAP', '').replace('USDT', '')
+                data = []
+                
+                # 创建日期到成交额的映射
+                volume_map = {}
+                if alert['daily_volumes_history']:
+                    for vol_data in alert['daily_volumes_history']:
+                        volume_map[vol_data['date']] = vol_data['volume']
+                
+                # 按排序后的日期填充数据
+                for date in sorted_dates:
+                    volume = volume_map.get(date, 0)
+                    data.append(round(volume / 1_000_000, 1))  # 转换为百万
+                
+                datasets.append({
+                    "label": inst_name,
+                    "data": data,
+                    "borderColor": colors[i % len(colors)],
+                    "backgroundColor": colors[i % len(colors)] + "20",  # 添加透明度
+                    "fill": False,
+                    "tension": 0.4
+                })
+            
+            chart_config = {
+                "type": "line",
+                "data": {
+                    "labels": sorted_dates,
+                    "datasets": datasets
+                },
+                "options": {
+                    "responsive": True,
+                    "maintainAspectRatio": False,
+                    "plugins": {
+                        "title": {
+                            "display": True,
+                            "text": "OKX 成交额趋势对比",
+                            "font": {
+                                "size": 16,
+                                "weight": "bold"
+                            }
+                        },
+                        "legend": {
+                            "display": True,
+                            "position": "top"
+                        }
+                    },
+                    "scales": {
+                        "y": {
+                            "beginAtZero": True,
+                            "title": {
+                                "display": True,
+                                "text": "成交额 (百万USDT)"
+                            }
+                        },
+                        "x": {
+                            "title": {
+                                "display": True,
+                                "text": "日期"
+                            }
+                        }
+                    }
+                }
+            }
+            
+            chart_json = json.dumps(chart_config)
+            encoded_chart = urllib.parse.quote(chart_json)
+            chart_url = f"https://quickchart.io/chart?c={encoded_chart}&width=800&height=400&format=png"
+            
+            print(f"生成趋势图表URL成功，包含 {len(top_alerts)} 个交易对")
+            return chart_url
+            
+        except Exception as e:
+            print(f"生成趋势图表URL时出错: {e}")
+            return None
+    
     def create_billion_volume_table(self, billion_alerts):
         """创建过亿成交额的表格格式消息"""
         if not billion_alerts:
@@ -276,8 +462,22 @@ class OKXVolumeMonitor:
         
         content = "## 💰 日成交过亿信号\n\n"
         
+        # 生成图表
+        chart_url = self.generate_chart_url_quickchart(billion_alerts)
+        trend_chart_url = self.generate_trend_chart_url(billion_alerts)
+        
+        # 添加图表
+        if chart_url:
+            content += f"### 📊 成交额排行图\n"
+            content += f"![成交额排行]({chart_url})\n\n"
+        
+        if trend_chart_url:
+            content += f"### 📈 成交额趋势图\n"
+            content += f"![成交额趋势]({trend_chart_url})\n\n"
+        
         # 构建表头
-        header = "| 交易对 | 当天成交额 |"
+        header = "### 📋 详细数据表格\n\n"
+        header += "| 交易对 | 当天成交额 |"
         separator = "|--------|------------|"
         
         # 获取最多的历史天数
@@ -482,7 +682,7 @@ class OKXVolumeMonitor:
                 table_content = self.create_alert_table(all_alerts)
                 content += table_content
             
-            # 再创建过亿成交额表格（放在最后）
+            # 再创建过亿成交额表格（包含图表）
             if all_billion_alerts:
                 billion_table_content = self.create_billion_volume_table(all_billion_alerts)
                 content += billion_table_content
@@ -494,7 +694,8 @@ class OKXVolumeMonitor:
             content += "- **过亿信号**: 当天成交额超过1亿USDT\n"
             content += "- **相比上期**: 与上一个同周期的交易额对比\n"
             content += "- **相比MA10**: 与过去10个周期平均值对比\n"
-            content += "- **K/M/B**: 千/百万/十亿 USDT"
+            content += "- **K/M/B**: 千/百万/十亿 USDT\n"
+            content += "- **图表**: 由QuickChart.io生成，显示排行和趋势对比"
             
             success = self.send_notification(title, content)
             if success:
