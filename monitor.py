@@ -31,6 +31,8 @@ class OKXVolumeMonitor:
         self.timezone = pytz.timezone('Asia/Shanghai')
         # 新增：图表分组配置
         self.chart_group_size = 3  # 每3个币种一个图，可配置
+        self.request_delay = 0.2  # 请求间隔，200ms
+        self.max_retries = 3  # 最大重试次数
         
     def get_current_time_str(self):
         """获取当前UTC+8时间字符串"""
@@ -65,8 +67,35 @@ class OKXVolumeMonitor:
             print(f"[{self.get_current_time_str()}] 获取交易对时出错: {e}")
             return []
     
-    def get_kline_data(self, inst_id, bar='1H', limit=20):
-        """获取K线数据"""
+     def safe_request_with_retry(self, url, params=None, timeout=30):
+        """带重试机制的安全请求方法"""
+        for attempt in range(self.max_retries):
+            try:
+                # 添加随机延迟，避免请求过于规律
+                time.sleep(self.request_delay + random.uniform(0, 0.1))
+                
+                response = self.session.get(url, params=params, timeout=timeout)
+                
+                if response.status_code == 429:
+                    wait_time = (attempt + 1) * 2  # 指数退避：2s, 4s, 6s
+                    print(f"[{self.get_current_time_str()}] 遇到429错误，等待{wait_time}秒后重试...")
+                    time.sleep(wait_time)
+                    continue
+                    
+                response.raise_for_status()
+                return response
+                
+            except Exception as e:
+                if attempt == self.max_retries - 1:
+                    raise e
+                wait_time = (attempt + 1) * 1  # 1s, 2s, 3s
+                print(f"[{self.get_current_time_str()}] 请求失败，{wait_time}秒后重试: {e}")
+                time.sleep(wait_time)
+        
+        return None
+
+     def get_kline_data(self, inst_id, bar='1H', limit=20):
+        """获取K线数据（修改版本）"""
         try:
             url = f"{self.base_url}/api/v5/market/candles"
             params = {
@@ -75,9 +104,10 @@ class OKXVolumeMonitor:
                 'limit': limit
             }
             
-            response = self.session.get(url, params=params, timeout=30)
-            response.raise_for_status()
-            
+            response = self.safe_request_with_retry(url, params=params)
+            if not response:
+                return []
+                
             data = response.json()
             if data['code'] == '0':
                 return data['data']
@@ -137,11 +167,12 @@ class OKXVolumeMonitor:
             return []
     
     def check_volume_explosion_batch(self, instruments_batch):
-        """批量检查多个交易对的爆量情况"""
+        """批量检查多个交易对的爆量情况（修改版本）"""
         alerts = []
         billion_volume_alerts = []
         
-        with ThreadPoolExecutor(max_workers=10) as executor:
+        # 减少并发数，避免429错误
+        with ThreadPoolExecutor(max_workers=3) as executor:  # 从10改为3
             # 提交所有任务
             future_to_inst = {
                 executor.submit(self.check_single_instrument_volume, inst['instId']): inst['instId'] 
@@ -152,7 +183,7 @@ class OKXVolumeMonitor:
             for future in future_to_inst:
                 inst_id = future_to_inst[future]
                 try:
-                    inst_alerts, billion_alert = future.result(timeout=30)  # 30秒超时
+                    inst_alerts, billion_alert = future.result(timeout=60)  # 从30秒改为60秒
                     if inst_alerts:
                         alerts.extend(inst_alerts)
                         print(f"[{self.get_current_time_str()}] 发现爆量: {inst_id}")
@@ -692,8 +723,8 @@ class OKXVolumeMonitor:
             print(f"[{self.get_current_time_str()}] 发送通知时出错: {e}")
             return False
     
-    def run_monitor(self):
-        """运行监控主程序"""
+     def run_monitor(self):
+        """运行监控主程序（修改版本）"""
         print(f"[{self.get_current_time_str()}] 开始监控")
         
         # 获取交易对列表
@@ -703,7 +734,7 @@ class OKXVolumeMonitor:
             return
         
         # 监控所有活跃的交易对，分批处理
-        batch_size = 10
+        batch_size = 5  # 从10改为5，减少并发压力
         total_batches = (len(instruments) + batch_size - 1) // batch_size
         print(f"[{self.get_current_time_str()}] 开始监控所有 {len(instruments)} 个交易对，分 {total_batches} 批处理")
         
@@ -722,9 +753,10 @@ class OKXVolumeMonitor:
                 all_alerts.extend(batch_alerts)
                 all_billion_alerts.extend(batch_billion_alerts)
                 
-                # 批次间添加短暂延迟
+                # 批次间添加更长延迟，从2秒改为5秒
                 if batch_index < total_batches:
-                    time.sleep(2)
+                    print(f"[{self.get_current_time_str()}] 批次间等待5秒...")
+                    time.sleep(5)
                     
             except Exception as e:
                 print(f"[{self.get_current_time_str()}] 处理第 {batch_index} 批时出错: {e}")
