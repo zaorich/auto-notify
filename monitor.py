@@ -275,21 +275,35 @@ class OKXVolumeMonitor:
             return None
         
         try:
-            # 限制显示前8个交易对，避免图表过于拥挤
-            top_alerts = billion_alerts[:8]
+            # 显示所有过亿成交的交易对
+            top_alerts = billion_alerts
             
-            # 准备数据
+            # 准备数据和颜色
             labels = []
             current_data = []
-            colors = [
+            # 动态生成足够的颜色
+            base_colors = [
                 '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0',
-                '#9966FF', '#FF9F40', '#FF6384', '#C9CBCF'
+                '#9966FF', '#FF9F40', '#FF6B6B', '#4ECDC4',
+                '#45B7D1', '#FFA07A', '#98D8C8', '#F7DC6F',
+                '#BB8FCE', '#85C1E9', '#F8C471', '#82E0AA',
+                '#F1948A', '#AED6F1', '#F9E79F', '#A9DFBF'
             ]
+            
+            # 如果交易对数量超过预定义颜色，则循环使用
+            colors = []
+            for i in range(len(top_alerts)):
+                colors.append(base_colors[i % len(base_colors)])
             
             for i, alert in enumerate(top_alerts):
                 inst_name = alert['inst_id'].replace('-SWAP', '').replace('USDT', '')
                 labels.append(inst_name)
                 current_data.append(round(alert['current_daily_volume'] / 1_000_000, 1))  # 转换为百万
+            
+            # 动态调整图表尺寸
+            num_items = len(top_alerts)
+            chart_width = max(800, min(1200, 100 * num_items))  # 根据数量调整宽度
+            chart_height = max(400, min(800, 50 * num_items))   # 根据数量调整高度
             
             # 构建Chart.js配置
             chart_config = {
@@ -333,6 +347,10 @@ class OKXVolumeMonitor:
                             "title": {
                                 "display": True,
                                 "text": "交易对"
+                            },
+                            "ticks": {
+                                "maxRotation": 45,
+                                "minRotation": 0
                             }
                         }
                     }
@@ -343,10 +361,10 @@ class OKXVolumeMonitor:
             chart_json = json.dumps(chart_config)
             encoded_chart = urllib.parse.quote(chart_json)
             
-            # 生成QuickChart URL
-            chart_url = f"https://quickchart.io/chart?c={encoded_chart}&width=800&height=400&format=png"
+            # 生成QuickChart URL，使用动态尺寸
+            chart_url = f"https://quickchart.io/chart?c={encoded_chart}&width={chart_width}&height={chart_height}&format=png"
             
-            print(f"生成图表URL成功，包含 {len(top_alerts)} 个交易对")
+            print(f"生成图表URL成功，包含 {len(top_alerts)} 个交易对，尺寸: {chart_width}x{chart_height}")
             return chart_url
             
         except Exception as e:
@@ -359,8 +377,8 @@ class OKXVolumeMonitor:
             return None
         
         try:
-            # 选择前5个交易对显示趋势
-            top_alerts = billion_alerts[:5]
+            # 显示所有交易对的趋势
+            top_alerts = billion_alerts
             
             # 获取所有可用的日期
             all_dates = set()
@@ -374,7 +392,14 @@ class OKXVolumeMonitor:
             
             # 为每个交易对准备数据
             datasets = []
-            colors = ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF']
+            # 扩展颜色列表以支持更多交易对
+            base_colors = [
+                '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF',
+                '#FF9F40', '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A',
+                '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9', '#F8C471',
+                '#82E0AA', '#F1948A', '#AED6F1', '#F9E79F', '#A9DFBF',
+                '#D7BDE2', '#A3E4D7', '#F9E79F', '#FADBD8', '#D5DBDB'
+            ]
             
             for i, alert in enumerate(top_alerts):
                 inst_name = alert['inst_id'].replace('-SWAP', '').replace('USDT', '')
@@ -391,14 +416,20 @@ class OKXVolumeMonitor:
                     volume = volume_map.get(date, 0)
                     data.append(round(volume / 1_000_000, 1))  # 转换为百万
                 
+                color = base_colors[i % len(base_colors)]
                 datasets.append({
                     "label": inst_name,
                     "data": data,
-                    "borderColor": colors[i % len(colors)],
-                    "backgroundColor": colors[i % len(colors)] + "20",  # 添加透明度
+                    "borderColor": color,
+                    "backgroundColor": color + "20",  # 添加透明度
                     "fill": False,
                     "tension": 0.4
                 })
+            
+            # 动态调整图表尺寸
+            num_items = len(top_alerts)
+            chart_width = max(800, min(1400, 80 * num_items))
+            chart_height = max(500, min(900, 40 * num_items))
             
             chart_config = {
                 "type": "line",
@@ -443,13 +474,160 @@ class OKXVolumeMonitor:
             
             chart_json = json.dumps(chart_config)
             encoded_chart = urllib.parse.quote(chart_json)
-            chart_url = f"https://quickchart.io/chart?c={encoded_chart}&width=800&height=400&format=png"
+            chart_url = f"https://quickchart.io/chart?c={encoded_chart}&width={chart_width}&height={chart_height}&format=png"
             
-            print(f"生成趋势图表URL成功，包含 {len(top_alerts)} 个交易对")
+            print(f"生成趋势图表URL成功，包含 {len(top_alerts)} 个交易对，尺寸: {chart_width}x{chart_height}")
+    def generate_volume_explosion_chart(self, alerts):
+        """为爆量信号生成图表"""
+        if not alerts or len(alerts) == 0:
+            return None
+        
+        try:
+            # 按时间框架分组
+            hour_alerts = [alert for alert in alerts if alert['timeframe'] == '1H']
+            four_hour_alerts = [alert for alert in alerts if alert['timeframe'] == '4H']
+            
+            all_chart_alerts = hour_alerts + four_hour_alerts
+            if not all_chart_alerts:
+                return None
+            
+            # 按交易额排序
+            all_chart_alerts.sort(key=lambda x: x['current_volume'], reverse=True)
+            
+            # 准备数据
+            labels = []
+            volume_data = []
+            ratio_data = []
+            colors = []
+            
+            # 扩展颜色列表
+            base_colors = [
+                '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF',
+                '#FF9F40', '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A',
+                '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9', '#F8C471',
+                '#82E0AA', '#F1948A', '#AED6F1', '#F9E79F', '#A9DFBF'
+            ]
+            
+            for i, alert in enumerate(all_chart_alerts):
+                inst_name = alert['inst_id'].replace('-SWAP', '').replace('USDT', '')
+                timeframe = alert['timeframe']
+                label = f"{inst_name}({timeframe})"
+                
+                labels.append(label)
+                volume_data.append(round(alert['current_volume'] / 1_000_000, 1))  # 转换为百万
+                
+                # 取较大的倍数
+                max_ratio = max(
+                    alert.get('prev_ratio', 0) or 0,
+                    alert.get('ma10_ratio', 0) or 0
+                )
+                ratio_data.append(round(max_ratio, 1))
+                
+                # 根据时间框架选择颜色深浅
+                base_color = base_colors[i % len(base_colors)]
+                if timeframe == '4H':
+                    colors.append(base_color + 'AA')  # 4H稍微透明
+                else:
+                    colors.append(base_color)
+            
+            # 动态调整图表尺寸
+            num_items = len(all_chart_alerts)
+            chart_width = max(900, min(1400, 100 * num_items))
+            chart_height = max(500, min(800, 50 * num_items))
+            
+            # 构建双轴图表配置
+            chart_config = {
+                "type": "bar",
+                "data": {
+                    "labels": labels,
+                    "datasets": [
+                        {
+                            "label": "交易额(百万USDT)",
+                            "data": volume_data,
+                            "backgroundColor": colors,
+                            "borderColor": colors,
+                            "borderWidth": 1,
+                            "yAxisID": "y"
+                        },
+                        {
+                            "label": "爆量倍数",
+                            "data": ratio_data,
+                            "type": "line",
+                            "borderColor": "#FF0000",
+                            "backgroundColor": "#FF000030",
+                            "borderWidth": 3,
+                            "fill": False,
+                            "yAxisID": "y1",
+                            "pointBackgroundColor": "#FF0000",
+                            "pointBorderColor": "#FFFFFF",
+                            "pointRadius": 5
+                        }
+                    ]
+                },
+                "options": {
+                    "responsive": True,
+                    "maintainAspectRatio": False,
+                    "plugins": {
+                        "title": {
+                            "display": True,
+                            "text": "OKX 爆量信号分析",
+                            "font": {
+                                "size": 16,
+                                "weight": "bold"
+                            }
+                        },
+                        "legend": {
+                            "display": True,
+                            "position": "top"
+                        }
+                    },
+                    "scales": {
+                        "y": {
+                            "type": "linear",
+                            "display": True,
+                            "position": "left",
+                            "beginAtZero": True,
+                            "title": {
+                                "display": True,
+                                "text": "交易额 (百万USDT)"
+                            }
+                        },
+                        "y1": {
+                            "type": "linear",
+                            "display": True,
+                            "position": "right",
+                            "beginAtZero": True,
+                            "title": {
+                                "display": True,
+                                "text": "爆量倍数"
+                            },
+                            "grid": {
+                                "drawOnChartArea": False
+                            }
+                        },
+                        "x": {
+                            "title": {
+                                "display": True,
+                                "text": "交易对(时间框架)"
+                            },
+                            "ticks": {
+                                "maxRotation": 45,
+                                "minRotation": 0
+                            }
+                        }
+                    }
+                }
+            }
+            
+            chart_json = json.dumps(chart_config)
+            encoded_chart = urllib.parse.quote(chart_json)
+            chart_url = f"https://quickchart.io/chart?c={encoded_chart}&width={chart_width}&height={chart_height}&format=png"
+            
+            print(f"生成爆量图表URL成功，包含 {len(all_chart_alerts)} 个信号，尺寸: {chart_width}x{chart_height}")
             return chart_url
             
         except Exception as e:
-            print(f"生成趋势图表URL时出错: {e}")
+            print(f"生成爆量图表URL时出错: {e}")
             return None
     
     def create_billion_volume_table(self, billion_alerts):
@@ -522,6 +700,14 @@ class OKXVolumeMonitor:
         if not alerts:
             return ""
         
+        content = ""
+        
+        # 生成爆量图表
+        explosion_chart_url = self.generate_volume_explosion_chart(alerts)
+        if explosion_chart_url:
+            content += "### 🔥 爆量信号图表\n"
+            content += f"![爆量信号图表]({explosion_chart_url})\n\n"
+        
         # 按时间框架分组
         hour_alerts = [alert for alert in alerts if alert['timeframe'] == '1H']
         four_hour_alerts = [alert for alert in alerts if alert['timeframe'] == '4H']
@@ -529,8 +715,6 @@ class OKXVolumeMonitor:
         # 按当前交易额从高到低排序
         hour_alerts.sort(key=lambda x: x['current_volume'], reverse=True)
         four_hour_alerts.sort(key=lambda x: x['current_volume'], reverse=True)
-        
-        content = ""
         
         if hour_alerts:
             content += "## 🔥 1小时爆量信号\n\n"
