@@ -288,7 +288,7 @@ class OKXVolumeMonitor:
             ]
             
             for i, alert in enumerate(billion_alerts):
-                inst_name = alert['inst_id'].replace('-SWAP', '').replace('USDT', '')
+                inst_name = alert['inst_id'].replace('-SWAP', '').replace('-USDT', '')
                 labels.append(inst_name)
                 current_data.append(round(alert['current_daily_volume'] / 1_000_000, 1))  # 转换为百万
             
