@@ -734,7 +734,7 @@ class OKXVolumeMonitor:
             return
         
         # 监控所有活跃的交易对，分批处理
-        batch_size = 5  # 从10改为5，减少并发压力
+        batch_size = 8  # 从10改为8，减少并发压力
         total_batches = (len(instruments) + batch_size - 1) // batch_size
         print(f"[{self.get_current_time_str()}] 开始监控所有 {len(instruments)} 个交易对，分 {total_batches} 批处理")
         
@@ -755,7 +755,7 @@ class OKXVolumeMonitor:
                 
                 # 批次间添加更长延迟2秒
                 if batch_index < total_batches:
-                    print(f"[{self.get_current_time_str()}] 批次间等待5秒...")
+                    print(f"[{self.get_current_time_str()}] 批次间等待2秒...")
                     time.sleep(2)
                     
             except Exception as e:
