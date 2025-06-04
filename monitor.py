@@ -31,7 +31,7 @@ class OKXVolumeMonitor:
         self.timezone = pytz.timezone('Asia/Shanghai')
         # 新增：图表分组配置
         self.chart_group_size = 3  # 每3个币种一个图，可配置
-        self.request_delay = 0.2  # 请求间隔，200ms
+        self.request_delay = 0.02  # 请求间隔，20ms
         self.max_retries = 3  # 最大重试次数
         
     def get_current_time_str(self):
