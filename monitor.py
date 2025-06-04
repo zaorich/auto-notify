@@ -72,7 +72,7 @@ class OKXVolumeMonitor:
         for attempt in range(self.max_retries):
             try:
                 # 添加随机延迟，避免请求过于规律
-                time.sleep(self.request_delay + random.uniform(0, 0.1))
+                time.sleep(self.request_delay)
                 
                 response = self.session.get(url, params=params, timeout=timeout)
                 
