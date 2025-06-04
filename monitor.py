@@ -15,6 +15,7 @@ import threading
 import urllib.parse
 from io import BytesIO
 import base64
+import pytz
 
 class OKXVolumeMonitor:
     def __init__(self):
@@ -26,7 +27,13 @@ class OKXVolumeMonitor:
         })
         self.heartbeat_file = 'last_alert_time.txt'
         self.heartbeat_interval = 4 * 60 * 60  # 4小时（秒）
+        # 设置UTC+8时区
+        self.timezone = pytz.timezone('Asia/Shanghai')
         
+    def get_current_time_str(self):
+        """获取当前UTC+8时间字符串"""
+        return datetime.now(self.timezone).strftime('%Y-%m-%d %H:%M:%S')
+    
     def get_perpetual_instruments(self):
         """获取永续合约交易对列表"""
         try:
@@ -46,14 +53,14 @@ class OKXVolumeMonitor:
                     inst for inst in instruments 
                     if inst['state'] == 'live' and 'USDT' in inst['instId']
                 ]
-                print(f"获取到 {len(active_instruments)} 个活跃的USDT永续合约")
+                print(f"[{self.get_current_time_str()}] 获取到 {len(active_instruments)} 个活跃的USDT永续合约")
                 return active_instruments
             else:
-                print(f"获取交易对失败: {data}")
+                print(f"[{self.get_current_time_str()}] 获取交易对失败: {data}")
                 return []
                 
         except Exception as e:
-            print(f"获取交易对时出错: {e}")
+            print(f"[{self.get_current_time_str()}] 获取交易对时出错: {e}")
             return []
     
     def get_kline_data(self, inst_id, bar='1H', limit=20):
@@ -73,11 +80,11 @@ class OKXVolumeMonitor:
             if data['code'] == '0':
                 return data['data']
             else:
-                print(f"获取{inst_id}的K线数据失败: {data}")
+                print(f"[{self.get_current_time_str()}] 获取{inst_id}的K线数据失败: {data}")
                 return []
                 
         except Exception as e:
-            print(f"获取{inst_id}的K线数据时出错: {e}")
+            print(f"[{self.get_current_time_str()}] 获取{inst_id}的K线数据时出错: {e}")
             return []
     
     def calculate_volume_ratio(self, kline_data):
@@ -112,7 +119,7 @@ class OKXVolumeMonitor:
                 daily_volumes = []
                 for kline in daily_klines:
                     timestamp = int(kline[0]) / 1000  # 转换为秒
-                    date = datetime.fromtimestamp(timestamp).strftime('%m-%d')
+                    date = datetime.fromtimestamp(timestamp, self.timezone).strftime('%m-%d')
                     volume = float(kline[7])  # 交易额
                     daily_volumes.append({
                         'date': date,
@@ -121,7 +128,7 @@ class OKXVolumeMonitor:
                 return daily_volumes
             return []
         except Exception as e:
-            print(f"获取{inst_id}历史日交易额时出错: {e}")
+            print(f"[{self.get_current_time_str()}] 获取{inst_id}历史日交易额时出错: {e}")
             return []
     
     def check_volume_explosion_batch(self, instruments_batch):
@@ -143,12 +150,12 @@ class OKXVolumeMonitor:
                     inst_alerts, billion_alert = future.result(timeout=30)  # 30秒超时
                     if inst_alerts:
                         alerts.extend(inst_alerts)
-                        print(f"发现爆量: {inst_id}")
+                        print(f"[{self.get_current_time_str()}] 发现爆量: {inst_id}")
                     if billion_alert:
                         billion_volume_alerts.append(billion_alert)
-                        print(f"发现过亿成交: {inst_id}")
+                        print(f"[{self.get_current_time_str()}] 发现过亿成交: {inst_id}")
                 except Exception as e:
-                    print(f"检查 {inst_id} 时出错: {e}")
+                    print(f"[{self.get_current_time_str()}] 检查 {inst_id} 时出错: {e}")
                     continue
         
         return alerts, billion_volume_alerts
@@ -164,7 +171,7 @@ class OKXVolumeMonitor:
                 return total_volume
             return 0
         except Exception as e:
-            print(f"获取{inst_id}当天交易额时出错: {e}")
+            print(f"[{self.get_current_time_str()}] 获取{inst_id}当天交易额时出错: {e}")
             return 0
     
     def check_single_instrument_volume(self, inst_id):
@@ -173,7 +180,7 @@ class OKXVolumeMonitor:
         billion_alert = None
         
         try:
-            # 获取当天交易额
+            # 获取当天交易额（通过get_daily_volume方法，即24小时内1小时K线的volCcyQuote字段之和）
             daily_volume = self.get_daily_volume(inst_id)
             
             # 检查是否过亿
@@ -191,6 +198,7 @@ class OKXVolumeMonitor:
             if hour_data:
                 prev_ratio, ma10_ratio = self.calculate_volume_ratio(hour_data)
                 if prev_ratio and ma10_ratio:
+                    # 当前交易额来源：最新1小时K线的volCcyQuote字段（hour_data[0][7]）
                     current_volume = float(hour_data[0][7])
                     
                     # 小时爆量标准：10倍
@@ -198,18 +206,25 @@ class OKXVolumeMonitor:
                         alert_data = {
                             'inst_id': inst_id,
                             'timeframe': '1H',
-                            'current_volume': current_volume,
+                            'current_volume': current_volume,  # 来自最新1小时K线的volCcyQuote字段
                             'prev_ratio': prev_ratio if prev_ratio >= 10 else None,
                             'ma10_ratio': ma10_ratio if ma10_ratio >= 10 else None,
-                            'daily_volume': daily_volume
+                            'daily_volume': daily_volume  # 来自get_daily_volume方法（24小时内所有1小时K线volCcyQuote之和）
                         }
                         alerts.append(alert_data)
+                        
+                        # 添加详细日志
+                        print(f"[{self.get_current_time_str()}] 1H爆量检测 {inst_id}: "
+                              f"当前小时交易额={self.format_volume(current_volume)}(K线volCcyQuote[7]), "
+                              f"当天总交易额={self.format_volume(daily_volume)}(24小时K线volCcyQuote之和), "
+                              f"相比上期={prev_ratio:.1f}x, 相比MA10={ma10_ratio:.1f}x")
             
             # 检查4小时爆量
             four_hour_data = self.get_kline_data(inst_id, '4H', 20)
             if four_hour_data:
                 prev_ratio, ma10_ratio = self.calculate_volume_ratio(four_hour_data)
                 if prev_ratio and ma10_ratio:
+                    # 当前交易额来源：最新4小时K线的volCcyQuote字段（four_hour_data[0][7]）
                     current_volume = float(four_hour_data[0][7])
                     
                     # 4小时爆量标准：5倍
@@ -217,17 +232,23 @@ class OKXVolumeMonitor:
                         alert_data = {
                             'inst_id': inst_id,
                             'timeframe': '4H',
-                            'current_volume': current_volume,
+                            'current_volume': current_volume,  # 来自最新4小时K线的volCcyQuote字段
                             'prev_ratio': prev_ratio if prev_ratio >= 5 else None,
                             'ma10_ratio': ma10_ratio if ma10_ratio >= 5 else None,
-                            'daily_volume': daily_volume
+                            'daily_volume': daily_volume  # 来自get_daily_volume方法（24小时内所有1小时K线volCcyQuote之和）
                         }
                         alerts.append(alert_data)
+                        
+                        # 添加详细日志
+                        print(f"[{self.get_current_time_str()}] 4H爆量检测 {inst_id}: "
+                              f"当前4小时交易额={self.format_volume(current_volume)}(K线volCcyQuote[7]), "
+                              f"当天总交易额={self.format_volume(daily_volume)}(24小时K线volCcyQuote之和), "
+                              f"相比上期={prev_ratio:.1f}x, 相比MA10={ma10_ratio:.1f}x")
             
             return alerts, billion_alert
             
         except Exception as e:
-            print(f"检查 {inst_id} 时出错: {e}")
+            print(f"[{self.get_current_time_str()}] 检查 {inst_id} 时出错: {e}")
             return [], None
     
     def get_last_alert_time(self):
@@ -239,7 +260,7 @@ class OKXVolumeMonitor:
                     return timestamp
             return 0
         except Exception as e:
-            print(f"读取上次警报时间失败: {e}")
+            print(f"[{self.get_current_time_str()}] 读取上次警报时间失败: {e}")
             return 0
     
     def update_last_alert_time(self):
@@ -248,7 +269,7 @@ class OKXVolumeMonitor:
             with open(self.heartbeat_file, 'w') as f:
                 f.write(str(time.time()))
         except Exception as e:
-            print(f"更新上次警报时间失败: {e}")
+            print(f"[{self.get_current_time_str()}] 更新上次警报时间失败: {e}")
     
     def should_send_heartbeat(self):
         """检查是否需要发送心跳消息"""
@@ -288,6 +309,7 @@ class OKXVolumeMonitor:
             ]
             
             for i, alert in enumerate(billion_alerts):
+                # 修改过滤逻辑
                 inst_name = alert['inst_id'].replace('-SWAP', '').replace('-USDT', '')
                 labels.append(inst_name)
                 current_data.append(round(alert['current_daily_volume'] / 1_000_000, 1))  # 转换为百万
@@ -347,11 +369,11 @@ class OKXVolumeMonitor:
             # 生成QuickChart URL
             chart_url = f"https://quickchart.io/chart?c={encoded_chart}&width=800&height=400&format=png"
             
-            print(f"生成图表URL成功，包含 {len(billion_alerts)} 个交易对")
+            print(f"[{self.get_current_time_str()}] 生成图表URL成功，包含 {len(billion_alerts)} 个交易对")
             return chart_url
             
         except Exception as e:
-            print(f"生成图表URL时出错: {e}")
+            print(f"[{self.get_current_time_str()}] 生成图表URL时出错: {e}")
             return None
     
     def generate_trend_chart_url(self, billion_alerts):
@@ -360,15 +382,15 @@ class OKXVolumeMonitor:
             return None
         
         try:
-            # 过滤掉BTC和ETH交易对
+            # 过滤掉BTC和ETH交易对（修改过滤逻辑）
             filtered_alerts = []
             for alert in billion_alerts:
-                inst_name = alert['inst_id'].replace('-SWAP', '').replace('USDT', '')
+                inst_name = alert['inst_id'].replace('-SWAP', '').replace('-USDT', '')
                 if inst_name not in ['BTC', 'ETH']:
                     filtered_alerts.append(alert)
             
             if not filtered_alerts:
-                print("过滤BTC和ETH后，没有交易对可显示趋势图")
+                print(f"[{self.get_current_time_str()}] 过滤BTC和ETH后，没有交易对可显示趋势图")
                 return None
             
             # 获取所有可用的日期
@@ -391,7 +413,8 @@ class OKXVolumeMonitor:
             ]
             
             for i, alert in enumerate(filtered_alerts):
-                inst_name = alert['inst_id'].replace('-SWAP', '').replace('USDT', '')
+                # 修改过滤逻辑
+                inst_name = alert['inst_id'].replace('-SWAP', '').replace('-USDT', '')
                 data = []
                 
                 # 创建日期到成交额的映射
@@ -459,11 +482,11 @@ class OKXVolumeMonitor:
             encoded_chart = urllib.parse.quote(chart_json)
             chart_url = f"https://quickchart.io/chart?c={encoded_chart}&width=800&height=400&format=png"
             
-            print(f"生成趋势图表URL成功，包含 {len(filtered_alerts)} 个交易对（已排除BTC/ETH）")
+            print(f"[{self.get_current_time_str()}] 生成趋势图表URL成功，包含 {len(filtered_alerts)} 个交易对（已排除BTC/ETH）")
             return chart_url
             
         except Exception as e:
-            print(f"生成趋势图表URL时出错: {e}")
+            print(f"[{self.get_current_time_str()}] 生成趋势图表URL时出错: {e}")
             return None
     
     def create_billion_volume_table(self, billion_alerts):
@@ -584,12 +607,12 @@ class OKXVolumeMonitor:
     
     def send_heartbeat_notification(self, monitored_count):
         """发送心跳监测消息"""
-        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        current_time = self.get_current_time_str()
         last_alert_time = self.get_last_alert_time()
         
         if last_alert_time > 0:
-            last_alert_datetime = datetime.fromtimestamp(last_alert_time)
-            time_since_alert = datetime.now() - last_alert_datetime
+            last_alert_datetime = datetime.fromtimestamp(last_alert_time, self.timezone)
+            time_since_alert = datetime.now(self.timezone) - last_alert_datetime
             hours_since = int(time_since_alert.total_seconds() / 3600)
             
             title = "OKX监控系统心跳 💓"
@@ -611,7 +634,7 @@ class OKXVolumeMonitor:
         
         success = self.send_notification(title, content)
         if success:
-            print("心跳消息发送成功")
+            print(f"[{self.get_current_time_str()}] 心跳消息发送成功")
         return success
     
     def send_notification(self, title, content):
@@ -628,30 +651,30 @@ class OKXVolumeMonitor:
             
             result = response.json()
             if result.get('code') == 0:
-                print(f"通知发送成功: {title}")
+                print(f"[{self.get_current_time_str()}] 通知发送成功: {title}")
                 return True
             else:
-                print(f"通知发送失败: {result}")
+                print(f"[{self.get_current_time_str()}] 通知发送失败: {result}")
                 return False
                 
         except Exception as e:
-            print(f"发送通知时出错: {e}")
+            print(f"[{self.get_current_time_str()}] 发送通知时出错: {e}")
             return False
     
     def run_monitor(self):
         """运行监控主程序"""
-        print(f"开始监控 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"[{self.get_current_time_str()}] 开始监控")
         
         # 获取交易对列表
         instruments = self.get_perpetual_instruments()
         if not instruments:
-            print("未能获取交易对列表，退出监控")
+            print(f"[{self.get_current_time_str()}] 未能获取交易对列表，退出监控")
             return
         
         # 监控所有活跃的交易对，分批处理
         batch_size = 10
         total_batches = (len(instruments) + batch_size - 1) // batch_size
-        print(f"开始监控所有 {len(instruments)} 个交易对，分 {total_batches} 批处理")
+        print(f"[{self.get_current_time_str()}] 开始监控所有 {len(instruments)} 个交易对，分 {total_batches} 批处理")
         
         all_alerts = []
         all_billion_alerts = []
@@ -661,7 +684,7 @@ class OKXVolumeMonitor:
             batch = instruments[batch_num:batch_num + batch_size]
             batch_index = batch_num // batch_size + 1
             
-            print(f"处理第 {batch_index}/{total_batches} 批 ({len(batch)} 个交易对)")
+            print(f"[{self.get_current_time_str()}] 处理第 {batch_index}/{total_batches} 批 ({len(batch)} 个交易对)")
             
             try:
                 batch_alerts, batch_billion_alerts = self.check_volume_explosion_batch(batch)
@@ -673,7 +696,7 @@ class OKXVolumeMonitor:
                     time.sleep(2)
                     
             except Exception as e:
-                print(f"处理第 {batch_index} 批时出错: {e}")
+                print(f"[{self.get_current_time_str()}] 处理第 {batch_index} 批时出错: {e}")
                 continue
         
         # 发送汇总通知
@@ -688,7 +711,7 @@ class OKXVolumeMonitor:
             else:
                 title = f"💰 OKX监控 - 发现{len(all_billion_alerts)}个过亿信号"
             
-            content = f"**监控时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            content = f"**监控时间**: {self.get_current_time_str()}\n"
             content += f"**监控范围**: {len(instruments)} 个交易对\n\n"
             
             # 先创建爆量表格
@@ -708,6 +731,8 @@ class OKXVolumeMonitor:
             content += "- **过亿信号**: 当天成交额超过1亿USDT\n"
             content += "- **相比上期**: 与上一个同周期的交易额对比\n"
             content += "- **相比MA10**: 与过去10个周期平均值对比\n"
+            content += "- **当前交易额**: 1H为最新1小时K线volCcyQuote，4H为最新4小时K线volCcyQuote\n"
+            content += "- **当天总额**: 24小时内所有1小时K线volCcyQuote字段之和\n"
             content += "- **K/M/B**: 千/百万/十亿 USDT\n"
             content += "- **图表**: 由QuickChart.io生成，显示排行和趋势对比\n"
             content += "- **趋势图**: 已排除BTC和ETH交易对，专注于其他币种"
@@ -717,17 +742,17 @@ class OKXVolumeMonitor:
                 # 更新上次发送爆量警报的时间
                 self.update_last_alert_time()
         else:
-            print("未发现爆量或过亿成交情况")
+            print(f"[{self.get_current_time_str()}] 未发现爆量或过亿成交情况")
             
             # 检查是否需要发送心跳消息
             if self.should_send_heartbeat():
-                print("距离上次爆量警报已超过4小时，发送心跳消息")
+                print(f"[{self.get_current_time_str()}] 距离上次爆量警报已超过4小时，发送心跳消息")
                 heartbeat_success = self.send_heartbeat_notification(len(instruments))
                 if heartbeat_success:
                     # 更新心跳时间（避免频繁发送心跳）
                     self.update_last_alert_time()
         
-        print(f"监控完成 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"[{self.get_current_time_str()}] 监控完成")
 
 if __name__ == "__main__":
     monitor = OKXVolumeMonitor()
