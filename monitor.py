@@ -67,7 +67,7 @@ class OKXVolumeMonitor:
             print(f"[{self.get_current_time_str()}] 获取交易对时出错: {e}")
             return []
     
-     def safe_request_with_retry(self, url, params=None, timeout=30):
+    def safe_request_with_retry(self, url, params=None, timeout=30):
         """带重试机制的安全请求方法"""
         for attempt in range(self.max_retries):
             try:
@@ -94,7 +94,7 @@ class OKXVolumeMonitor:
         
         return None
 
-     def get_kline_data(self, inst_id, bar='1H', limit=20):
+    def get_kline_data(self, inst_id, bar='1H', limit=20):
         """获取K线数据（修改版本）"""
         try:
             url = f"{self.base_url}/api/v5/market/candles"
