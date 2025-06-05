@@ -30,7 +30,7 @@ class OKXVolumeMonitor:
         # 设置UTC+8时区
         self.timezone = pytz.timezone('Asia/Shanghai')
         # 新增：图表分组配置
-        self.chart_group_size = 3  # 每3个币种一个图，可配置
+        self.chart_group_size = 6  # 每3个币种一个图，可配置
         self.request_delay = 0.2  # 请求间隔，200ms
         self.max_retries = 3  # 最大重试次数
         
