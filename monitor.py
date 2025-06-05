@@ -476,7 +476,7 @@ class OKXVolumeMonitor:
             return None
     
 
-    def generate_trend_chart_urls(self, billion_alerts):
+     def generate_trend_chart_urls(self, billion_alerts):
         """生成多个趋势图表URL（每N个币种一个图，N可配置）"""
         if not billion_alerts or len(billion_alerts) == 0:
             return []
@@ -500,7 +500,7 @@ class OKXVolumeMonitor:
                     for vol_data in alert['daily_volumes_history']:
                         all_dates.add(vol_data['date'])
             
-            # 按日期排序
+            # 按日期排序 - 将此变量移到循环外部
             sorted_dates = sorted(list(all_dates))[-7:]  # 最近7天
             
             # 按每N个币种分组（使用可配置的分组大小）
@@ -563,6 +563,23 @@ class OKXVolumeMonitor:
                             "legend": {
                                 "display": True,
                                 "position": "top"
+                            },
+                            "annotation": {
+                                "annotations": {
+                                    "line1": {
+                                        "type": "line",
+                                        "yMin": 100,
+                                        "yMax": 100,
+                                        "borderColor": "red",
+                                        "borderWidth": 2,
+                                        "borderDash": [5, 5],
+                                        "label": {
+                                            "content": "1亿USDT基准线",
+                                            "enabled": True,
+                                            "position": "end"
+                                        }
+                                    }
+                                }
                             }
                         },
                         "scales": {
@@ -756,9 +773,14 @@ class OKXVolumeMonitor:
             print(f"[{self.get_current_time_str()}] 心跳消息发送成功")
         return success
     
-    def send_notification(self, title, content):
+     def send_notification(self, title, content):
         """通过Server酱发送微信通知"""
         try:
+            # 检查 SERVER_JIANG_KEY 是否为空
+            if not self.server_jiang_key or self.server_jiang_key.strip() == '':
+                print(f"[{self.get_current_time_str()}] SERVER_JIANG_KEY 为空，跳过发送通知")
+                return False
+            
             url = f"https://sctapi.ftqq.com/{self.server_jiang_key}.send"
             data = {
                 'title': title,
