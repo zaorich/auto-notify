@@ -404,16 +404,10 @@ class OKXVolumeMonitor:
             
             # 构建Chart.js配置
             chart_config = {
-                "type": "bar",
+                "type": "line",
                 "data": {
-                    "labels": labels,
-                    "datasets": [{
-                        "label": "当天成交额 (百万USDT)",
-                        "data": current_data,
-                        "backgroundColor": [colors[i % len(colors)] for i in range(len(billion_alerts))],
-                        "borderColor": [colors[i % len(colors)] for i in range(len(billion_alerts))],
-                        "borderWidth": 1
-                    }]
+                    "labels": sorted_dates,
+                    "datasets": datasets
                 },
                 "options": {
                     "responsive": True,
@@ -421,7 +415,7 @@ class OKXVolumeMonitor:
                     "plugins": {
                         "title": {
                             "display": True,
-                            "text": "OKX 过亿成交额排行",
+                            "text": f"OKX 成交额趋势对比 第{group_index//self.chart_group_size + 1}组 (排除BTC/ETH)",
                             "font": {
                                 "size": 16,
                                 "weight": "bold"
@@ -430,6 +424,23 @@ class OKXVolumeMonitor:
                         "legend": {
                             "display": True,
                             "position": "top"
+                        },
+                        "annotation": {
+                            "annotations": {
+                                "line1": {
+                                    "type": "line",
+                                    "yMin": 100,
+                                    "yMax": 100,
+                                    "borderColor": "red",
+                                    "borderWidth": 2,
+                                    "borderDash": [5, 5],
+                                    "label": {
+                                        "content": "1亿USDT基准线",
+                                        "enabled": True,
+                                        "position": "end"
+                                    }
+                                }
+                            }
                         }
                     },
                     "scales": {
@@ -443,7 +454,7 @@ class OKXVolumeMonitor:
                         "x": {
                             "title": {
                                 "display": True,
-                                "text": "交易对"
+                                "text": "日期"
                             }
                         }
                     }
