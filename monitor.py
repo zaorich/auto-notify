@@ -33,6 +33,12 @@ class OKXVolumeMonitor:
         self.chart_group_size = 6  # 每3个币种一个图，可配置
         self.request_delay = 0.2  # 请求间隔，200ms
         self.max_retries = 3  # 最大重试次数
+
+        # 新增：图表开关配置
+        self.enable_bar_chart = True   # 或 False
+        self.enable_trend_chart = False  # 或 True
+        # self.enable_bar_chart = os.environ.get('ENABLE_BAR_CHART', 'true').lower() == 'true'  # 柱状图开关
+        # self.enable_trend_chart = os.environ.get('ENABLE_TREND_CHART', 'true').lower() == 'true'  # 趋势图开关
         
     def get_current_time_str(self):
         """获取当前UTC+8时间字符串"""
@@ -557,6 +563,7 @@ class OKXVolumeMonitor:
 
    
     
+    # 修改 create_billion_volume_table 方法，添加开关控制
     def create_billion_volume_table(self, billion_alerts):
         """创建过亿成交额的表格格式消息"""
         if not billion_alerts:
@@ -567,16 +574,28 @@ class OKXVolumeMonitor:
         
         content = "## 💰 日成交过亿信号\n\n"
         
-        # 生成图表
-        chart_url = self.generate_chart_url_quickchart(billion_alerts)
-        trend_chart_urls = self.generate_trend_chart_urls(billion_alerts)  # 改为复数
+        # 根据开关决定是否生成图表
+        chart_url = None
+        trend_chart_urls = []
         
-        # 添加图表
-        if chart_url:
+        if self.enable_bar_chart:
+            chart_url = self.generate_chart_url_quickchart(billion_alerts)
+            print(f"[{self.get_current_time_str()}] 柱状图开关已开启，生成柱状图")
+        else:
+            print(f"[{self.get_current_time_str()}] 柱状图开关已关闭，跳过柱状图生成")
+        
+        if self.enable_trend_chart:
+            trend_chart_urls = self.generate_trend_chart_urls(billion_alerts)
+            print(f"[{self.get_current_time_str()}] 趋势图开关已开启，生成趋势图")
+        else:
+            print(f"[{self.get_current_time_str()}] 趋势图开关已关闭，跳过趋势图生成")
+        
+        # 添加图表（只有在开关开启且生成成功时才添加）
+        if self.enable_bar_chart and chart_url:
             content += f"### 📊 成交额排行图\n"
             content += f"![成交额排行]({chart_url})\n\n"
         
-        if trend_chart_urls:
+        if self.enable_trend_chart and trend_chart_urls:
             content += f"### 📈 成交额趋势图\n"
             for i, trend_url in enumerate(trend_chart_urls):
                 content += f"![成交额趋势第{i+1}组]({trend_url})\n\n"
@@ -742,6 +761,7 @@ class OKXVolumeMonitor:
             print(f"[{self.get_current_time_str()}] 发送通知时出错: {e}")
             return False
     
+    # 在说明部分也要相应修改
     def run_monitor(self):
         """运行监控主程序（修改版本）"""
         print(f"[{self.get_current_time_str()}] 开始监控")
@@ -806,7 +826,7 @@ class OKXVolumeMonitor:
                 billion_table_content = self.create_billion_volume_table(all_billion_alerts)
                 content += billion_table_content
             
-            # 添加说明
+            # 添加说明（根据开关状态调整说明内容）
             content += "---\n\n"
             content += "**说明**:\n"
             content += "- **爆量信号**: 1H需10倍增长，4H需5倍增长\n"
@@ -816,8 +836,23 @@ class OKXVolumeMonitor:
             content += "- **当前交易额**: 1H为最新1小时K线volCcyQuote，4H为最新4小时K线volCcyQuote\n"
             content += "- **当天总额**: 24小时内所有1小时K线volCcyQuote字段之和\n"
             content += "- **K/M/B**: 千/百万/十亿 USDT\n"
-            content += "- **图表**: 由QuickChart.io生成，显示排行和趋势对比\n"
-            content += "- **趋势图**: 已排除BTC和ETH交易对，专注于其他币种"
+            
+            # 根据开关状态添加图表说明
+            if self.enable_bar_chart or self.enable_trend_chart:
+                content += "- **图表**: 由QuickChart.io生成"
+                if self.enable_bar_chart and self.enable_trend_chart:
+                    content += "，包含排行图和趋势对比图\n"
+                elif self.enable_bar_chart:
+                    content += "，仅显示排行图\n"
+                elif self.enable_trend_chart:
+                    content += "，仅显示趋势对比图\n"
+                
+                if self.enable_trend_chart:
+                    content += "- **趋势图**: 已排除BTC和ETH交易对，专注于其他币种\n"
+            else:
+                content += "- **图表**: 已关闭图表功能\n"
+            
+            content += f"- **图表配置**: 柱状图{'✅' if self.enable_bar_chart else '❌'} 趋势图{'✅' if self.enable_trend_chart else '❌'}"
             
             success = self.send_notification(title, content)
             if success:
