@@ -26,24 +26,64 @@ class OKXVolumeMonitor:
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         })
         self.heartbeat_file = 'last_alert_time.txt'
+        self.billion_cache_file = 'last_billion_alerts.txt'  # 新增：存储上次过亿信号的文件
         self.heartbeat_interval = 4 * 60 * 60  # 4小时（秒）
         # 设置UTC+8时区
         self.timezone = pytz.timezone('Asia/Shanghai')
         # 新增：图表分组配置
-        self.chart_group_size = 6  # 每3个币种一个图，可配置
-        self.request_delay = 0.2  # 请求间隔，200ms
+        self.chart_group_size = 3  # 每3个币种一个图，可配置
+        self.request_delay = 0.02  # 请求间隔，20ms
         self.max_retries = 3  # 最大重试次数
 
-        # 新增：图表开关配置
-        self.enable_bar_chart = True   # 或 False
-        self.enable_trend_chart = False  # 或 True
-        # self.enable_bar_chart = os.environ.get('ENABLE_BAR_CHART', 'true').lower() == 'true'  # 柱状图开关
-        # self.enable_trend_chart = os.environ.get('ENABLE_TREND_CHART', 'true').lower() == 'true'  # 趋势图开关
-        
+    
     def get_current_time_str(self):
         """获取当前UTC+8时间字符串"""
         return datetime.now(self.timezone).strftime('%Y-%m-%d %H:%M:%S')
+
+    def get_last_billion_alerts(self):
+        """获取上次过亿信号的币种列表"""
+        try:
+            if os.path.exists(self.billion_cache_file):
+                with open(self.billion_cache_file, 'r', encoding='utf-8') as f:
+                    content = f.read().strip()
+                    if content:
+                        return set(content.split(','))
+            return set()
+        except Exception as e:
+            print(f"[{self.get_current_time_str()}] 读取上次过亿信号失败: {e}")
+            return set()
     
+    def update_last_billion_alerts(self, billion_alerts):
+        """更新上次过亿信号的币种列表"""
+        try:
+            if billion_alerts:
+                inst_ids = [alert['inst_id'] for alert in billion_alerts]
+                with open(self.billion_cache_file, 'w', encoding='utf-8') as f:
+                    f.write(','.join(inst_ids))
+            else:
+                # 如果没有过亿信号，清空文件
+                if os.path.exists(self.billion_cache_file):
+                    os.remove(self.billion_cache_file)
+        except Exception as e:
+            print(f"[{self.get_current_time_str()}] 更新上次过亿信号失败: {e}")
+    
+    def should_send_billion_alert(self, current_billion_alerts):
+        """检查是否需要发送过亿信号警报"""
+        if not current_billion_alerts:
+            return False
+        
+        # 获取当前过亿信号的币种集合
+        current_inst_ids = set(alert['inst_id'] for alert in current_billion_alerts)
+        
+        # 获取上次过亿信号的币种集合
+        last_inst_ids = self.get_last_billion_alerts()
+        
+        # 如果币种列表完全一样，则不发送
+        if current_inst_ids == last_inst_ids and len(last_inst_ids) > 0:
+            print(f"[{self.get_current_time_str()}] 过亿信号币种列表与上次相同，跳过发送: {current_inst_ids}")
+            return False
+        
+        return True
     def get_perpetual_instruments(self):
         """获取永续合约交易对列表"""
         try:
@@ -449,7 +489,7 @@ class OKXVolumeMonitor:
                     for vol_data in alert['daily_volumes_history']:
                         all_dates.add(vol_data['date'])
             
-            # 按日期排序 - 将此变量移到循环外部
+            # 按日期排序
             sorted_dates = sorted(list(all_dates))[-7:]  # 最近7天
             
             # 按每N个币种分组（使用可配置的分组大小）
@@ -512,23 +552,6 @@ class OKXVolumeMonitor:
                             "legend": {
                                 "display": True,
                                 "position": "top"
-                            },
-                            "annotation": {
-                                "annotations": {
-                                    "line1": {
-                                        "type": "line",
-                                        "yMin": 100,
-                                        "yMax": 100,
-                                        "borderColor": "red",
-                                        "borderWidth": 2,
-                                        "borderDash": [5, 5],
-                                        "label": {
-                                            "content": "1亿USDT基准线",
-                                            "enabled": True,
-                                            "position": "end"
-                                        }
-                                    }
-                                }
                             }
                         },
                         "scales": {
@@ -560,10 +583,7 @@ class OKXVolumeMonitor:
         except Exception as e:
             print(f"[{self.get_current_time_str()}] 生成趋势图表URL时出错: {e}")
             return []
-
-   
     
-    # 修改 create_billion_volume_table 方法，添加开关控制
     def create_billion_volume_table(self, billion_alerts):
         """创建过亿成交额的表格格式消息"""
         if not billion_alerts:
@@ -574,28 +594,16 @@ class OKXVolumeMonitor:
         
         content = "## 💰 日成交过亿信号\n\n"
         
-        # 根据开关决定是否生成图表
-        chart_url = None
-        trend_chart_urls = []
+        # 生成图表
+        chart_url = self.generate_chart_url_quickchart(billion_alerts)
+        trend_chart_urls = self.generate_trend_chart_urls(billion_alerts)  # 改为复数
         
-        if self.enable_bar_chart:
-            chart_url = self.generate_chart_url_quickchart(billion_alerts)
-            print(f"[{self.get_current_time_str()}] 柱状图开关已开启，生成柱状图")
-        else:
-            print(f"[{self.get_current_time_str()}] 柱状图开关已关闭，跳过柱状图生成")
-        
-        if self.enable_trend_chart:
-            trend_chart_urls = self.generate_trend_chart_urls(billion_alerts)
-            print(f"[{self.get_current_time_str()}] 趋势图开关已开启，生成趋势图")
-        else:
-            print(f"[{self.get_current_time_str()}] 趋势图开关已关闭，跳过趋势图生成")
-        
-        # 添加图表（只有在开关开启且生成成功时才添加）
-        if self.enable_bar_chart and chart_url:
+        # 添加图表
+        if chart_url:
             content += f"### 📊 成交额排行图\n"
             content += f"![成交额排行]({chart_url})\n\n"
         
-        if self.enable_trend_chart and trend_chart_urls:
+        if trend_chart_urls:
             content += f"### 📈 成交额趋势图\n"
             for i, trend_url in enumerate(trend_chart_urls):
                 content += f"![成交额趋势第{i+1}组]({trend_url})\n\n"
@@ -659,7 +667,7 @@ class OKXVolumeMonitor:
         
         if hour_alerts:
             content += "## 🔥 1小时爆量信号\n\n"
-            content += "| 交易对 | 当前交易额 | 相比上期 | 相比MA10 | 当天总额 | 昨天 | 前天 | 3天前 |\n"
+            content += "| 交易对 | 当前交易额 | 相比上期 | 相比MA10 | 24H总额 | 当天 | 昨天 | 前天 |\n"
             content += "|--------|------------|----------|----------|----------|------|------|------|\n"
             
             for alert in hour_alerts:
@@ -682,7 +690,7 @@ class OKXVolumeMonitor:
         
         if four_hour_alerts:
             content += "## 🚀 4小时爆量信号\n\n"
-            content += "| 交易对 | 当前交易额 | 相比上期 | 相比MA10 | 当天总额 | 昨天 | 前天 | 3天前 |\n"
+            content += "| 交易对 | 当前交易额 | 相比上期 | 相比MA10 | 24H总额 | 当天 | 昨天 | 前天 |\n"
             content += "|--------|------------|----------|----------|----------|------|------|------|\n"
             
             for alert in four_hour_alerts:
@@ -761,7 +769,6 @@ class OKXVolumeMonitor:
             print(f"[{self.get_current_time_str()}] 发送通知时出错: {e}")
             return False
     
-    # 在说明部分也要相应修改
     def run_monitor(self):
         """运行监控主程序（修改版本）"""
         print(f"[{self.get_current_time_str()}] 开始监控")
@@ -773,7 +780,7 @@ class OKXVolumeMonitor:
             return
         
         # 监控所有活跃的交易对，分批处理
-        batch_size = 30  # 从10改为8，减少并发压力
+        batch_size = 30
         total_batches = (len(instruments) + batch_size - 1) // batch_size
         print(f"[{self.get_current_time_str()}] 开始监控所有 {len(instruments)} 个交易对，分 {total_batches} 批处理")
         
@@ -801,10 +808,30 @@ class OKXVolumeMonitor:
                 print(f"[{self.get_current_time_str()}] 处理第 {batch_index} 批时出错: {e}")
                 continue
         
-        # 发送汇总通知
-        has_any_signal = len(all_alerts) > 0 or len(all_billion_alerts) > 0
+        # 判断是否需要发送警报
+        has_explosion_alerts = len(all_alerts) > 0
+        has_billion_alerts = len(all_billion_alerts) > 0
+        should_send_billion = self.should_send_billion_alert(all_billion_alerts)
         
-        if has_any_signal:
+        # 发送汇总通知的逻辑
+        should_send_notification = False
+        
+        if has_explosion_alerts and has_billion_alerts:
+            # 有爆量信号和过亿信号
+            if should_send_billion:
+                should_send_notification = True
+            else:
+                # 过亿信号相同，但有爆量信号，只发送爆量信号
+                all_billion_alerts = []  # 清空过亿信号，只发送爆量信号
+                should_send_notification = True
+        elif has_explosion_alerts:
+            # 只有爆量信号
+            should_send_notification = True
+        elif has_billion_alerts:
+            # 只有过亿信号
+            should_send_notification = should_send_billion
+        
+        if should_send_notification:
             # 构建标题
             if len(all_alerts) > 0 and len(all_billion_alerts) > 0:
                 title = f"🚨 OKX监控 - {len(all_alerts)}个爆量+{len(all_billion_alerts)}个过亿"
@@ -826,7 +853,7 @@ class OKXVolumeMonitor:
                 billion_table_content = self.create_billion_volume_table(all_billion_alerts)
                 content += billion_table_content
             
-            # 添加说明（根据开关状态调整说明内容）
+            # 添加说明
             content += "---\n\n"
             content += "**说明**:\n"
             content += "- **爆量信号**: 1H需10倍增长，4H需5倍增长\n"
@@ -836,30 +863,17 @@ class OKXVolumeMonitor:
             content += "- **当前交易额**: 1H为最新1小时K线volCcyQuote，4H为最新4小时K线volCcyQuote\n"
             content += "- **当天总额**: 24小时内所有1小时K线volCcyQuote字段之和\n"
             content += "- **K/M/B**: 千/百万/十亿 USDT\n"
-            
-            # 根据开关状态添加图表说明
-            if self.enable_bar_chart or self.enable_trend_chart:
-                content += "- **图表**: 由QuickChart.io生成"
-                if self.enable_bar_chart and self.enable_trend_chart:
-                    content += "，包含排行图和趋势对比图\n"
-                elif self.enable_bar_chart:
-                    content += "，仅显示排行图\n"
-                elif self.enable_trend_chart:
-                    content += "，仅显示趋势对比图\n"
-                
-                if self.enable_trend_chart:
-                    content += "- **趋势图**: 已排除BTC和ETH交易对，专注于其他币种\n"
-            else:
-                content += "- **图表**: 已关闭图表功能\n"
-            
-            content += f"- **图表配置**: 柱状图{'✅' if self.enable_bar_chart else '❌'} 趋势图{'✅' if self.enable_trend_chart else '❌'}"
+            content += "- **图表**: 由QuickChart.io生成，显示排行和趋势对比\n"
+            content += "- **趋势图**: 已排除BTC和ETH交易对，专注于其他币种"
             
             success = self.send_notification(title, content)
             if success:
                 # 更新上次发送爆量警报的时间
                 self.update_last_alert_time()
+                # 更新过亿信号缓存（无论是否发送过亿信号）
+                self.update_last_billion_alerts(all_billion_alerts if has_billion_alerts else [])
         else:
-            print(f"[{self.get_current_time_str()}] 未发现爆量或过亿成交情况")
+            print(f"[{self.get_current_time_str()}] 未发现新的爆量或过亿成交情况")
             
             # 检查是否需要发送心跳消息
             if self.should_send_heartbeat():
