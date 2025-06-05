@@ -26,7 +26,6 @@ class OKXVolumeMonitor:
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         })
         self.heartbeat_file = 'last_alert_time.txt'
-        self.billion_cache_file = 'last_billion_alerts.txt'  # 新增：存储上次过亿信号的文件
         self.heartbeat_interval = 4 * 60 * 60  # 4小时（秒）
         # 设置UTC+8时区
         self.timezone = pytz.timezone('Asia/Shanghai')
@@ -34,56 +33,11 @@ class OKXVolumeMonitor:
         self.chart_group_size = 3  # 每3个币种一个图，可配置
         self.request_delay = 0.02  # 请求间隔，20ms
         self.max_retries = 3  # 最大重试次数
-
-    
+        
     def get_current_time_str(self):
         """获取当前UTC+8时间字符串"""
         return datetime.now(self.timezone).strftime('%Y-%m-%d %H:%M:%S')
-
-    def get_last_billion_alerts(self):
-        """获取上次过亿信号的币种列表"""
-        try:
-            if os.path.exists(self.billion_cache_file):
-                with open(self.billion_cache_file, 'r', encoding='utf-8') as f:
-                    content = f.read().strip()
-                    if content:
-                        return set(content.split(','))
-            return set()
-        except Exception as e:
-            print(f"[{self.get_current_time_str()}] 读取上次过亿信号失败: {e}")
-            return set()
     
-    def update_last_billion_alerts(self, billion_alerts):
-        """更新上次过亿信号的币种列表"""
-        try:
-            if billion_alerts:
-                inst_ids = [alert['inst_id'] for alert in billion_alerts]
-                with open(self.billion_cache_file, 'w', encoding='utf-8') as f:
-                    f.write(','.join(inst_ids))
-            else:
-                # 如果没有过亿信号，清空文件
-                if os.path.exists(self.billion_cache_file):
-                    os.remove(self.billion_cache_file)
-        except Exception as e:
-            print(f"[{self.get_current_time_str()}] 更新上次过亿信号失败: {e}")
-    
-    def should_send_billion_alert(self, current_billion_alerts):
-        """检查是否需要发送过亿信号警报"""
-        if not current_billion_alerts:
-            return False
-        
-        # 获取当前过亿信号的币种集合
-        current_inst_ids = set(alert['inst_id'] for alert in current_billion_alerts)
-        
-        # 获取上次过亿信号的币种集合
-        last_inst_ids = self.get_last_billion_alerts()
-        
-        # 如果币种列表完全一样，则不发送
-        if current_inst_ids == last_inst_ids and len(last_inst_ids) > 0:
-            print(f"[{self.get_current_time_str()}] 过亿信号币种列表与上次相同，跳过发送: {current_inst_ids}")
-            return False
-        
-        return True
     def get_perpetual_instruments(self):
         """获取永续合约交易对列表"""
         try:
@@ -780,7 +734,7 @@ class OKXVolumeMonitor:
             return
         
         # 监控所有活跃的交易对，分批处理
-        batch_size = 30
+        batch_size = 30  # 从10改为8，减少并发压力
         total_batches = (len(instruments) + batch_size - 1) // batch_size
         print(f"[{self.get_current_time_str()}] 开始监控所有 {len(instruments)} 个交易对，分 {total_batches} 批处理")
         
@@ -808,30 +762,10 @@ class OKXVolumeMonitor:
                 print(f"[{self.get_current_time_str()}] 处理第 {batch_index} 批时出错: {e}")
                 continue
         
-        # 判断是否需要发送警报
-        has_explosion_alerts = len(all_alerts) > 0
-        has_billion_alerts = len(all_billion_alerts) > 0
-        should_send_billion = self.should_send_billion_alert(all_billion_alerts)
+        # 发送汇总通知
+        has_any_signal = len(all_alerts) > 0 or len(all_billion_alerts) > 0
         
-        # 发送汇总通知的逻辑
-        should_send_notification = False
-        
-        if has_explosion_alerts and has_billion_alerts:
-            # 有爆量信号和过亿信号
-            if should_send_billion:
-                should_send_notification = True
-            else:
-                # 过亿信号相同，但有爆量信号，只发送爆量信号
-                all_billion_alerts = []  # 清空过亿信号，只发送爆量信号
-                should_send_notification = True
-        elif has_explosion_alerts:
-            # 只有爆量信号
-            should_send_notification = True
-        elif has_billion_alerts:
-            # 只有过亿信号
-            should_send_notification = should_send_billion
-        
-        if should_send_notification:
+        if has_any_signal:
             # 构建标题
             if len(all_alerts) > 0 and len(all_billion_alerts) > 0:
                 title = f"🚨 OKX监控 - {len(all_alerts)}个爆量+{len(all_billion_alerts)}个过亿"
@@ -870,10 +804,8 @@ class OKXVolumeMonitor:
             if success:
                 # 更新上次发送爆量警报的时间
                 self.update_last_alert_time()
-                # 更新过亿信号缓存（无论是否发送过亿信号）
-                self.update_last_billion_alerts(all_billion_alerts if has_billion_alerts else [])
         else:
-            print(f"[{self.get_current_time_str()}] 未发现新的爆量或过亿成交情况")
+            print(f"[{self.get_current_time_str()}] 未发现爆量或过亿成交情况")
             
             # 检查是否需要发送心跳消息
             if self.should_send_heartbeat():
