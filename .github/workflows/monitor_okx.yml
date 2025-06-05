@@ -1,11 +1,9 @@
 name: OKX Volume Monitor
-
 on:
   schedule:
     # 每小时的第0、20、40分钟各运行一次（例如 12:00, 12:20, 12:40）
     - cron: '0,20,40 * * * *'
   workflow_dispatch:
-
 jobs:
   monitor:
     runs-on: ubuntu-latest
@@ -19,24 +17,40 @@ jobs:
         with:
           python-version: '3.9'
           
+      # 创建 requirements.txt 文件（如果不存在）
+      - name: Create requirements.txt
+        run: |
+          cat > requirements.txt << EOF
+          requests==2.31.0
+          pandas==2.0.3
+          numpy==1.24.3
+          aiohttp==3.8.5
+          pytz==2023.3
+          EOF
+          
+      # 改进的依赖缓存策略
       - name: Cache pip dependencies
         uses: actions/cache@v3
         with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          path: |
+            ~/.cache/pip
+            ~/.local/lib/python3.9/site-packages
+          key: ${{ runner.os }}-python3.9-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-python3.9-pip-
+            ${{ runner.os }}-python3.9-
           
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y python3-matplotlib
-          
-      - name: Install Python dependencies
+      # 移除不必要的系统依赖安装
+      # matplotlib 在你的代码中实际上没有使用到
+      
+      - name: Install Python dependencies with cache
         run: |
           python -m pip install --upgrade pip
-          pip install requests pandas numpy aiohttp matplotlib
+          # 使用 --user 安装到用户目录，便于缓存
+          pip install --user --no-warn-script-location -r requirements.txt
           
       - name: Run volume monitor
         run: python monitor.py
         env:
-          SERVER_JIANG_KEY: SCT281228TBF1BQU3KUJ4vLRkykhzIE80e
-          MPLBACKEND: Agg
+          SERVER_JIANG_KEY: ${{ secrets.SERVER_JIANG_KEY }}
+          PYTHONPATH: $HOME/.local/lib/python3.9/site-packages:$PYTHONPATH
