@@ -428,7 +428,7 @@ class OKXVolumeMonitor:
             encoded_chart = urllib.parse.quote(chart_json)
             
             # 生成QuickChart URL
-            chart_url = f"https://quickchart.io/chart?c={encoded_chart}&width=800&height=400&format=png"
+            chart_url = f"https://quickchart.io/chart?c={encoded_chart}&width=1200&height=400&format=png"
             
             print(f"[{self.get_current_time_str()}] 生成柱状图URL成功，包含 {len(filtered_alerts)} 个交易对（已排除{'/'.join(self.excluded_pairs)}）")
             return chart_url
@@ -561,7 +561,7 @@ class OKXVolumeMonitor:
                 
                 chart_json = json.dumps(chart_config)
                 encoded_chart = urllib.parse.quote(chart_json)
-                chart_url = f"https://quickchart.io/chart?c={encoded_chart}&width=1200&height=400&format=png"
+                chart_url = f"https://quickchart.io/chart?c={encoded_chart}&width=1600&height=400&format=png"
                 chart_urls.append(chart_url)
             
             excluded_pairs_text = '/'.join(self.excluded_pairs)
