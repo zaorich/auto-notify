@@ -524,23 +524,6 @@ class OKXVolumeMonitor:
                             "legend": {
                                 "display": True,
                                 "position": "top"
-                            },
-                            "annotation": {
-                                "annotations": {
-                                    "line1": {
-                                        "type": "line",
-                                        "yMin": 100,
-                                        "yMax": 100,
-                                        "borderColor": "red",
-                                        "borderWidth": 2,
-                                        "borderDash": [5, 5],
-                                        "label": {
-                                            "content": "1亿USDT基准线",
-                                            "enabled": True,
-                                            "position": "end"
-                                        }
-                                    }
-                                }
                             }
                         },
                         "scales": {
@@ -560,6 +543,20 @@ class OKXVolumeMonitor:
                         }
                     }
                 }
+                
+                # 添加1亿USDT基准线数据到datasets中
+                baseline_data = [100] * len(sorted_dates)  # 100百万 = 1亿
+                datasets.append({
+                    "label": "1亿USDT基准线",
+                    "data": baseline_data,
+                    "borderColor": "#ff0000",
+                    "backgroundColor": "rgba(255, 0, 0, 0.1)",
+                    "borderWidth": 2,
+                    "borderDash": [5, 5],
+                    "fill": False,
+                    "pointRadius": 0,
+                    "pointHoverRadius": 0
+                })
                 
                 chart_json = json.dumps(chart_config)
                 encoded_chart = urllib.parse.quote(chart_json)
