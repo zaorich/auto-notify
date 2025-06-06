@@ -35,8 +35,8 @@ class OKXVolumeMonitor:
         self.max_retries = 3  # 最大重试次数
 
         # 新增：图表开关配置
-        self.enable_bar_chart = True   # 或 False
-        self.enable_trend_chart = False  # 或 True
+        self.enable_bar_chart = False   # 或 False
+        self.enable_trend_chart = True  # 或 True
         # self.enable_bar_chart = os.environ.get('ENABLE_BAR_CHART', 'true').lower() == 'true'  # 柱状图开关
         # self.enable_trend_chart = os.environ.get('ENABLE_TREND_CHART', 'true').lower() == 'true'  # 趋势图开关
         # 新增：图表排除交易对配置（可配置）
