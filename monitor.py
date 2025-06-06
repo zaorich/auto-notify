@@ -561,7 +561,7 @@ class OKXVolumeMonitor:
                 
                 chart_json = json.dumps(chart_config)
                 encoded_chart = urllib.parse.quote(chart_json)
-                chart_url = f"https://quickchart.io/chart?c={encoded_chart}&width=1600&height=400&format=png"
+                chart_url = f"https://quickchart.io/chart?c={encoded_chart}&width=1200&height=400&format=png"
                 chart_urls.append(chart_url)
             
             excluded_pairs_text = '/'.join(self.excluded_pairs)
