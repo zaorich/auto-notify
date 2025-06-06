@@ -334,11 +334,11 @@ class OKXVolumeMonitor:
         if volume >= 1_000_000_000:  # 10亿
             return f"{volume/1_000_000_000:.2f}B"
         elif volume >= 1_000_000:  # 100万
-            return f"{volume/1_000_000:.2f}M"
+            return f"{volume/1_000_000:.0f}M"
         elif volume >= 1_000:  # 1千
-            return f"{volume/1_000:.2f}K"
+            return f"{volume/1_000:.0f}K"
         else:
-            return f"{volume:.2f}"
+            return f"{volume:.0f}"
     
     
     def generate_chart_url_quickchart(self, billion_alerts):
