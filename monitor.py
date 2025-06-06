@@ -26,6 +26,7 @@ class OKXVolumeMonitor:
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         })
         self.heartbeat_file = 'last_alert_time.txt'
+        self.last_billion_pairs_file = 'last_billion_pairs.txt'  # 新增：记录上次过亿交易对
         self.heartbeat_interval = 4 * 60 * 60  # 4小时（秒）
         # 设置UTC+8时区
         self.timezone = pytz.timezone('Asia/Shanghai')
@@ -770,7 +771,42 @@ class OKXVolumeMonitor:
             print(f"[{self.get_current_time_str()}] 发送通知时出错: {e}")
             return False
     
-    # 在说明部分也要相应修改
+     
+    def get_last_billion_pairs(self):
+        """获取上次过亿成交的交易对列表"""
+        try:
+            if os.path.exists(self.last_billion_pairs_file):
+                with open(self.last_billion_pairs_file, 'r') as f:
+                    pairs_json = f.read().strip()
+                    if pairs_json:
+                        return json.loads(pairs_json)
+            return []
+        except Exception as e:
+            print(f"[{self.get_current_time_str()}] 读取上次过亿交易对失败: {e}")
+            return []
+    
+    def update_last_billion_pairs(self, billion_alerts):
+        """更新上次过亿成交的交易对列表"""
+        try:
+            pairs = [alert['inst_id'] for alert in billion_alerts]
+            pairs.sort()  # 排序以便比较
+            with open(self.last_billion_pairs_file, 'w') as f:
+                f.write(json.dumps(pairs))
+        except Exception as e:
+            print(f"[{self.get_current_time_str()}] 更新上次过亿交易对失败: {e}")
+    
+    def is_billion_pairs_same_as_last(self, current_billion_alerts):
+        """检查当前过亿交易对是否与上次完全相同"""
+        if not current_billion_alerts:
+            return False
+        
+        current_pairs = [alert['inst_id'] for alert in current_billion_alerts]
+        current_pairs.sort()
+        
+        last_pairs = self.get_last_billion_pairs()
+        
+        return current_pairs == last_pairs
+    
     def run_monitor(self):
         """运行监控主程序（修改版本）"""
         print(f"[{self.get_current_time_str()}] 开始监控")
@@ -782,7 +818,7 @@ class OKXVolumeMonitor:
             return
         
         # 监控所有活跃的交易对，分批处理
-        batch_size = 30  # 从10改为8，减少并发压力
+        batch_size = 30
         total_batches = (len(instruments) + batch_size - 1) // batch_size
         print(f"[{self.get_current_time_str()}] 开始监控所有 {len(instruments)} 个交易对，分 {total_batches} 批处理")
         
@@ -810,14 +846,25 @@ class OKXVolumeMonitor:
                 print(f"[{self.get_current_time_str()}] 处理第 {batch_index} 批时出错: {e}")
                 continue
         
+        # 检查是否需要发送通知
+        has_volume_alerts = len(all_alerts) > 0
+        has_billion_alerts = len(all_billion_alerts) > 0
+        
+        # 如果只有过亿信号且与上次相同，则跳过发送
+        if not has_volume_alerts and has_billion_alerts:
+            if self.is_billion_pairs_same_as_last(all_billion_alerts):
+                current_pairs = [alert['inst_id'] for alert in all_billion_alerts]
+                print(f"[{self.get_current_time_str()}] 过亿交易对与上次相同 ({', '.join(current_pairs)})，跳过发送")
+                return
+        
         # 发送汇总通知
-        has_any_signal = len(all_alerts) > 0 or len(all_billion_alerts) > 0
+        has_any_signal = has_volume_alerts or has_billion_alerts
         
         if has_any_signal:
             # 构建标题
-            if len(all_alerts) > 0 and len(all_billion_alerts) > 0:
+            if has_volume_alerts and has_billion_alerts:
                 title = f"🚨 OKX监控 - {len(all_alerts)}个爆量+{len(all_billion_alerts)}个过亿"
-            elif len(all_alerts) > 0:
+            elif has_volume_alerts:
                 title = f"🚨 OKX监控 - 发现{len(all_alerts)}个爆量信号"
             else:
                 title = f"💰 OKX监控 - 发现{len(all_billion_alerts)}个过亿信号"
@@ -867,6 +914,9 @@ class OKXVolumeMonitor:
             if success:
                 # 更新上次发送爆量警报的时间
                 self.update_last_alert_time()
+                # 如果有过亿信号，更新上次过亿交易对记录
+                if all_billion_alerts:
+                    self.update_last_billion_pairs(all_billion_alerts)
         else:
             print(f"[{self.get_current_time_str()}] 未发现爆量或过亿成交情况")
             
@@ -879,7 +929,7 @@ class OKXVolumeMonitor:
                     self.update_last_alert_time()
         
         print(f"[{self.get_current_time_str()}] 监控完成")
-
+        
 if __name__ == "__main__":
     monitor = OKXVolumeMonitor()
     monitor.run_monitor()
