@@ -52,5 +52,5 @@ jobs:
       - name: Run volume monitor
         run: python monitor.py
         env:
-          SERVER_JIANG_KEY: ${{ secrets.SERVER_JIANG_KEY }}
+          SERVER_JIANG_KEY: SCT281228TBF1BQU3KUJ4vLRkykhzIE80e
           PYTHONPATH: $HOME/.local/lib/python3.9/site-packages:$PYTHONPATH
