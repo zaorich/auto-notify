@@ -39,6 +39,8 @@ class OKXVolumeMonitor:
         self.enable_trend_chart = False  # 或 True
         # self.enable_bar_chart = os.environ.get('ENABLE_BAR_CHART', 'true').lower() == 'true'  # 柱状图开关
         # self.enable_trend_chart = os.environ.get('ENABLE_TREND_CHART', 'true').lower() == 'true'  # 趋势图开关
+        # 新增：图表排除交易对配置（可配置）
+        self.excluded_pairs = ['BTC', 'ETH']  # 可以修改为其他需要排除的交易对
         
     def get_current_time_str(self):
         """获取当前UTC+8时间字符串"""
@@ -339,12 +341,21 @@ class OKXVolumeMonitor:
             return f"{volume:.2f}"
     
     def generate_chart_url_quickchart(self, billion_alerts):
-        """使用QuickChart生成图表URL"""
+        """使用QuickChart生成图表URL（修改版本：排除指定交易对）"""
         if not billion_alerts or len(billion_alerts) == 0:
             return None
         
         try:
-            # 不限制显示个数，显示所有交易对
+            # 过滤掉指定的交易对
+            filtered_alerts = []
+            for alert in billion_alerts:
+                inst_name = alert['inst_id'].replace('-SWAP', '').replace('-USDT', '')
+                if inst_name not in self.excluded_pairs:
+                    filtered_alerts.append(alert)
+            
+            if not filtered_alerts:
+                print(f"[{self.get_current_time_str()}] 过滤{'/'.join(self.excluded_pairs)}后，没有交易对可显示柱状图")
+                return None
             
             # 准备数据
             labels = []
@@ -356,13 +367,13 @@ class OKXVolumeMonitor:
                 '#A133FF', '#33FFF5', '#F5FF33', '#FF8C33'
             ]
             
-            for i, alert in enumerate(billion_alerts):
-                # 修改过滤逻辑
+            for i, alert in enumerate(filtered_alerts):
                 inst_name = alert['inst_id'].replace('-SWAP', '').replace('-USDT', '')
                 labels.append(inst_name)
                 current_data.append(round(alert['current_daily_volume'] / 1_000_000, 1))  # 转换为百万
             
             # 构建Chart.js配置
+            excluded_text = f" (排除{'/'.join(self.excluded_pairs)})" if self.excluded_pairs else ""
             chart_config = {
                 "type": "bar",
                 "data": {
@@ -370,8 +381,8 @@ class OKXVolumeMonitor:
                     "datasets": [{
                         "label": "当天成交额 (百万USDT)",
                         "data": current_data,
-                        "backgroundColor": [colors[i % len(colors)] for i in range(len(billion_alerts))],
-                        "borderColor": [colors[i % len(colors)] for i in range(len(billion_alerts))],
+                        "backgroundColor": [colors[i % len(colors)] for i in range(len(filtered_alerts))],
+                        "borderColor": [colors[i % len(colors)] for i in range(len(filtered_alerts))],
                         "borderWidth": 1
                     }]
                 },
@@ -381,7 +392,7 @@ class OKXVolumeMonitor:
                     "plugins": {
                         "title": {
                             "display": True,
-                            "text": "OKX 过亿成交额排行",
+                            "text": f"OKX 过亿成交额排行{excluded_text}",
                             "font": {
                                 "size": 16,
                                 "weight": "bold"
@@ -417,29 +428,28 @@ class OKXVolumeMonitor:
             # 生成QuickChart URL
             chart_url = f"https://quickchart.io/chart?c={encoded_chart}&width=800&height=400&format=png"
             
-            print(f"[{self.get_current_time_str()}] 生成图表URL成功，包含 {len(billion_alerts)} 个交易对")
+            print(f"[{self.get_current_time_str()}] 生成柱状图URL成功，包含 {len(filtered_alerts)} 个交易对（已排除{'/'.join(self.excluded_pairs)}）")
             return chart_url
             
         except Exception as e:
             print(f"[{self.get_current_time_str()}] 生成图表URL时出错: {e}")
-            return None
-    
+            return None    
 
-    def generate_trend_chart_urls(self, billion_alerts):
+     def generate_trend_chart_urls(self, billion_alerts):
         """生成多个趋势图表URL（每N个币种一个图，N可配置）"""
         if not billion_alerts or len(billion_alerts) == 0:
             return []
         
         try:
-            # 过滤掉BTC和ETH交易对
+            # 过滤掉指定的交易对
             filtered_alerts = []
             for alert in billion_alerts:
                 inst_name = alert['inst_id'].replace('-SWAP', '').replace('-USDT', '')
-                if inst_name not in ['BTC', 'ETH']:
+                if inst_name not in self.excluded_pairs:
                     filtered_alerts.append(alert)
             
             if not filtered_alerts:
-                print(f"[{self.get_current_time_str()}] 过滤BTC和ETH后，没有交易对可显示趋势图")
+                print(f"[{self.get_current_time_str()}] 过滤{'/'.join(self.excluded_pairs)}后，没有交易对可显示趋势图")
                 return []
             
             # 获取所有可用的日期
@@ -491,6 +501,7 @@ class OKXVolumeMonitor:
                         "tension": 0.4
                     })
                 
+                excluded_text = f" (排除{'/'.join(self.excluded_pairs)})" if self.excluded_pairs else ""
                 chart_config = {
                     "type": "line",
                     "data": {
@@ -503,7 +514,7 @@ class OKXVolumeMonitor:
                         "plugins": {
                             "title": {
                                 "display": True,
-                                "text": f"OKX 成交额趋势对比 第{group_index//self.chart_group_size + 1}组 (排除BTC/ETH)",
+                                "text": f"OKX 成交额趋势对比 第{group_index//self.chart_group_size + 1}组{excluded_text}",
                                 "font": {
                                     "size": 16,
                                     "weight": "bold"
@@ -554,13 +565,13 @@ class OKXVolumeMonitor:
                 chart_url = f"https://quickchart.io/chart?c={encoded_chart}&width=800&height=400&format=png"
                 chart_urls.append(chart_url)
             
-            print(f"[{self.get_current_time_str()}] 生成{len(chart_urls)}个趋势图表URL，每{self.chart_group_size}个币种一组，总共包含 {len(filtered_alerts)} 个交易对（已排除BTC/ETH）")
+            excluded_pairs_text = '/'.join(self.excluded_pairs)
+            print(f"[{self.get_current_time_str()}] 生成{len(chart_urls)}个趋势图表URL，每{self.chart_group_size}个币种一组，总共包含 {len(filtered_alerts)} 个交易对（已排除{excluded_pairs_text}）")
             return chart_urls
             
         except Exception as e:
             print(f"[{self.get_current_time_str()}] 生成趋势图表URL时出错: {e}")
             return []
-
    
     
     # 修改 create_billion_volume_table 方法，添加开关控制
