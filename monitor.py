@@ -340,6 +340,7 @@ class OKXVolumeMonitor:
         else:
             return f"{volume:.2f}"
     
+    
     def generate_chart_url_quickchart(self, billion_alerts):
         """使用QuickChart生成图表URL（修改版本：排除指定交易对）"""
         if not billion_alerts or len(billion_alerts) == 0:
@@ -434,8 +435,8 @@ class OKXVolumeMonitor:
         except Exception as e:
             print(f"[{self.get_current_time_str()}] 生成图表URL时出错: {e}")
             return None    
-
-     def generate_trend_chart_urls(self, billion_alerts):
+            
+    def generate_trend_chart_urls(self, billion_alerts):
         """生成多个趋势图表URL（每N个币种一个图，N可配置）"""
         if not billion_alerts or len(billion_alerts) == 0:
             return []
