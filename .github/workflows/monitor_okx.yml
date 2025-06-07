@@ -11,6 +11,17 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+      
+      # 添加状态文件缓存
+      - name: Cache monitoring state files
+        uses: actions/cache@v3
+        with:
+          path: |
+            last_alert_time.txt
+            last_billion_pairs.txt
+          key: okx-monitor-state-${{ github.run_number }}
+          restore-keys: |
+            okx-monitor-state-
         
       - name: Set up Python
         uses: actions/setup-python@v4
