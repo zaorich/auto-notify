@@ -693,16 +693,7 @@ class OKXVolumeMonitor:
         # if self.enable_bar_chart and chart_url:
         #     content += f"### 📊 成交额排行图\n"
         #     content += f"![成交额排行]({chart_url})\n\n"
-
-        # 添加图表（只有在开关开启且生成成功时才添加）
-        if self.enable_bar_chart and chart_urls:
-            content += f"### 📊 成交额排行图\n"
-            for i, chart_url in enumerate(chart_urls):
-                if i == 0:
-                    content += f"![成交额排行-5亿以上]({chart_url})\n\n"
-                else:
-                    content += f"![成交额排行-1到5亿]({chart_url})\n\n"
-                    
+                 
         
         if self.enable_trend_chart and trend_chart_urls:
             content += f"### 📈 成交额趋势图\n"
