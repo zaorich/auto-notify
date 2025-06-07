@@ -343,25 +343,25 @@ class OKXVolumeMonitor:
     
     
     def generate_chart_url_quickchart(self, billion_alerts):
-        """使用QuickChart生成图表URL（修改版本：排除指定交易对）"""
+        """使用QuickChart生成图表URL（修改版本：不排除BTC/ETH，分成5亿以上和5亿以下两个图表）"""
         if not billion_alerts or len(billion_alerts) == 0:
-            return None
+            return []
         
         try:
-            # 过滤掉指定的交易对
-            filtered_alerts = []
-            for alert in billion_alerts:
-                inst_name = alert['inst_id'].replace('-SWAP', '').replace('-USDT', '')
-                if inst_name not in self.excluded_pairs:
-                    filtered_alerts.append(alert)
+            # 不再过滤任何交易对，包含所有过亿的交易对
+            all_alerts = billion_alerts
             
-            if not filtered_alerts:
-                print(f"[{self.get_current_time_str()}] 过滤{'/'.join(self.excluded_pairs)}后，没有交易对可显示柱状图")
-                return None
+            # 按成交额分组：5亿以上和5亿以下
+            above_500m = []
+            below_500m = []
             
-            # 准备数据
-            labels = []
-            current_data = []
+            for alert in all_alerts:
+                if alert['current_daily_volume'] >= 500_000_000:  # 5亿USDT
+                    above_500m.append(alert)
+                else:
+                    below_500m.append(alert)
+            
+            chart_urls = []
             colors = [
                 '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0',
                 '#9966FF', '#FF9F40', '#FF6384', '#C9CBCF',
@@ -369,73 +369,142 @@ class OKXVolumeMonitor:
                 '#A133FF', '#33FFF5', '#F5FF33', '#FF8C33'
             ]
             
-            for i, alert in enumerate(filtered_alerts):
-                inst_name = alert['inst_id'].replace('-SWAP', '').replace('-USDT', '')
-                labels.append(inst_name)
-                current_data.append(round(alert['current_daily_volume'] / 1_000_000, 1))  # 转换为百万
-            
-            # 构建Chart.js配置
-            excluded_text = f" (排除{'/'.join(self.excluded_pairs)})" if self.excluded_pairs else ""
-            chart_config = {
-                "type": "bar",
-                "data": {
-                    "labels": labels,
-                    "datasets": [{
-                        "label": "当天成交额 (百万USDT)",
-                        "data": current_data,
-                        "backgroundColor": [colors[i % len(colors)] for i in range(len(filtered_alerts))],
-                        "borderColor": [colors[i % len(colors)] for i in range(len(filtered_alerts))],
-                        "borderWidth": 1
-                    }]
-                },
-                "options": {
-                    "responsive": True,
-                    "maintainAspectRatio": False,
-                    "plugins": {
-                        "title": {
-                            "display": True,
-                            "text": f"OKX 过亿成交额排行{excluded_text}",
-                            "font": {
-                                "size": 16,
-                                "weight": "bold"
-                            }
-                        },
-                        "legend": {
-                            "display": True,
-                            "position": "top"
-                        }
+            # 生成5亿以上的图表
+            if above_500m:
+                # 按成交额排序
+                above_500m.sort(key=lambda x: x['current_daily_volume'], reverse=True)
+                
+                labels = []
+                current_data = []
+                
+                for i, alert in enumerate(above_500m):
+                    inst_name = alert['inst_id'].replace('-SWAP', '').replace('-USDT', '')
+                    labels.append(inst_name)
+                    current_data.append(round(alert['current_daily_volume'] / 1_000_000, 1))  # 转换为百万
+                
+                chart_config = {
+                    "type": "bar",
+                    "data": {
+                        "labels": labels,
+                        "datasets": [{
+                            "label": "当天成交额 (百万USDT)",
+                            "data": current_data,
+                            "backgroundColor": [colors[i % len(colors)] for i in range(len(above_500m))],
+                            "borderColor": [colors[i % len(colors)] for i in range(len(above_500m))],
+                            "borderWidth": 1
+                        }]
                     },
-                    "scales": {
-                        "y": {
-                            "beginAtZero": True,
+                    "options": {
+                        "responsive": True,
+                        "maintainAspectRatio": False,
+                        "plugins": {
                             "title": {
                                 "display": True,
-                                "text": "成交额 (百万USDT)"
+                                "text": "OKX 过亿成交额排行 - 5亿以上",
+                                "font": {
+                                    "size": 16,
+                                    "weight": "bold"
+                                }
+                            },
+                            "legend": {
+                                "display": True,
+                                "position": "top"
                             }
                         },
-                        "x": {
-                            "title": {
-                                "display": True,
-                                "text": "交易对"
+                        "scales": {
+                            "y": {
+                                "beginAtZero": True,
+                                "title": {
+                                    "display": True,
+                                    "text": "成交额 (百万USDT)"
+                                }
+                            },
+                            "x": {
+                                "title": {
+                                    "display": True,
+                                    "text": "交易对"
+                                }
                             }
                         }
                     }
                 }
-            }
+                
+                chart_json = json.dumps(chart_config)
+                encoded_chart = urllib.parse.quote(chart_json)
+                chart_url = f"https://quickchart.io/chart?c={encoded_chart}&width=1200&height=400&format=png"
+                chart_urls.append(chart_url)
             
-            # 将配置转换为JSON字符串并编码
-            chart_json = json.dumps(chart_config)
-            encoded_chart = urllib.parse.quote(chart_json)
+            # 生成5亿以下的图表
+            if below_500m:
+                # 按成交额排序
+                below_500m.sort(key=lambda x: x['current_daily_volume'], reverse=True)
+                
+                labels = []
+                current_data = []
+                
+                for i, alert in enumerate(below_500m):
+                    inst_name = alert['inst_id'].replace('-SWAP', '').replace('-USDT', '')
+                    labels.append(inst_name)
+                    current_data.append(round(alert['current_daily_volume'] / 1_000_000, 1))  # 转换为百万
+                
+                chart_config = {
+                    "type": "bar",
+                    "data": {
+                        "labels": labels,
+                        "datasets": [{
+                            "label": "当天成交额 (百万USDT)",
+                            "data": current_data,
+                            "backgroundColor": [colors[i % len(colors)] for i in range(len(below_500m))],
+                            "borderColor": [colors[i % len(colors)] for i in range(len(below_500m))],
+                            "borderWidth": 1
+                        }]
+                    },
+                    "options": {
+                        "responsive": True,
+                        "maintainAspectRatio": False,
+                        "plugins": {
+                            "title": {
+                                "display": True,
+                                "text": "OKX 过亿成交额排行 - 1-5亿区间",
+                                "font": {
+                                    "size": 16,
+                                    "weight": "bold"
+                                }
+                            },
+                            "legend": {
+                                "display": True,
+                                "position": "top"
+                            }
+                        },
+                        "scales": {
+                            "y": {
+                                "beginAtZero": True,
+                                "title": {
+                                    "display": True,
+                                    "text": "成交额 (百万USDT)"
+                                }
+                            },
+                            "x": {
+                                "title": {
+                                    "display": True,
+                                    "text": "交易对"
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                chart_json = json.dumps(chart_config)
+                encoded_chart = urllib.parse.quote(chart_json)
+                chart_url = f"https://quickchart.io/chart?c={encoded_chart}&width=1200&height=400&format=png"
+                chart_urls.append(chart_url)
             
-            # 生成QuickChart URL
-            chart_url = f"https://quickchart.io/chart?c={encoded_chart}&width=1200&height=400&format=png"
-            
-            print(f"[{self.get_current_time_str()}] 生成柱状图URL成功，包含 {len(filtered_alerts)} 个交易对（已排除{'/'.join(self.excluded_pairs)}）")
-            return chart_url
+            print(f"[{self.get_current_time_str()}] 生成柱状图URL成功: 5亿以上 {len(above_500m)} 个，1-5亿 {len(below_500m)} 个")
+            return chart_urls
             
         except Exception as e:
             print(f"[{self.get_current_time_str()}] 生成图表URL时出错: {e}")
-            return None    
+            return []
             
     def generate_trend_chart_urls(self, billion_alerts):
         """生成多个趋势图表URL（每N个币种一个图，N可配置）"""
@@ -585,11 +654,11 @@ class OKXVolumeMonitor:
         content = "## 💰 日成交过亿信号\n\n"
         
         # 根据开关决定是否生成图表
-        chart_url = None
+        chart_urls  = None
         trend_chart_urls = []
         
         if self.enable_bar_chart:
-            chart_url = self.generate_chart_url_quickchart(billion_alerts)
+            chart_urls = self.generate_chart_url_quickchart(billion_alerts)
             print(f"[{self.get_current_time_str()}] 柱状图开关已开启，生成柱状图")
         else:
             print(f"[{self.get_current_time_str()}] 柱状图开关已关闭，跳过柱状图生成")
@@ -601,9 +670,9 @@ class OKXVolumeMonitor:
             print(f"[{self.get_current_time_str()}] 趋势图开关已关闭，跳过趋势图生成")
         
         # 添加图表（只有在开关开启且生成成功时才添加）
-        if self.enable_bar_chart and chart_url:
+        if self.enable_bar_chart and chart_urls:
             content += f"### 📊 成交额排行图\n"
-            content += f"![成交额排行]({chart_url})\n\n"
+            content += f"![成交额排行]({chart_urls})\n\n"
         
         if self.enable_trend_chart and trend_chart_urls:
             content += f"### 📈 成交额趋势图\n"
