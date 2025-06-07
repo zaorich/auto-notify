@@ -41,7 +41,8 @@ class OKXVolumeMonitor:
         # self.enable_bar_chart = os.environ.get('ENABLE_BAR_CHART', 'true').lower() == 'true'  # 柱状图开关
         # self.enable_trend_chart = os.environ.get('ENABLE_TREND_CHART', 'true').lower() == 'true'  # 趋势图开关
         # 新增：图表排除交易对配置（可配置）
-        self.excluded_pairs = ['BTC', 'ETH']  # 可以修改为其他需要排除的交易对
+        self.excluded_pairs = ['BTC', 'ETH']  # 可以修改为其他需要排除的交易对 # 仅趋势图排除，柱状图不排除
+
         
     def get_current_time_str(self):
         """获取当前UTC+8时间字符串"""
@@ -342,6 +343,7 @@ class OKXVolumeMonitor:
             return f"{volume:.0f}"
     
     
+    # 2. 完全替换 generate_chart_url_quickchart 方法
     def generate_chart_url_quickchart(self, billion_alerts):
         """使用QuickChart生成图表URL（修改版本：不排除BTC/ETH，分成5亿以上和5亿以下两个图表）"""
         if not billion_alerts or len(billion_alerts) == 0:
@@ -504,7 +506,7 @@ class OKXVolumeMonitor:
             
         except Exception as e:
             print(f"[{self.get_current_time_str()}] 生成图表URL时出错: {e}")
-            return []
+            return []            
             
     def generate_trend_chart_urls(self, billion_alerts):
         """生成多个趋势图表URL（每N个币种一个图，N可配置）"""
@@ -653,8 +655,17 @@ class OKXVolumeMonitor:
         
         content = "## 💰 日成交过亿信号\n\n"
         
-        # 根据开关决定是否生成图表
-        chart_urls  = None
+        # # 根据开关决定是否生成图表
+        # chart_url = None
+        # trend_chart_urls = []
+        
+        # if self.enable_bar_chart:
+        #     chart_url = self.generate_chart_url_quickchart(billion_alerts)
+        #     print(f"[{self.get_current_time_str()}] 柱状图开关已开启，生成柱状图")
+        # else:
+        #     print(f"[{self.get_current_time_str()}] 柱状图开关已关闭，跳过柱状图生成")
+
+        chart_urls = []
         trend_chart_urls = []
         
         if self.enable_bar_chart:
@@ -663,6 +674,15 @@ class OKXVolumeMonitor:
         else:
             print(f"[{self.get_current_time_str()}] 柱状图开关已关闭，跳过柱状图生成")
         
+        # 添加图表（只有在开关开启且生成成功时才添加）
+        if self.enable_bar_chart and chart_urls:
+            content += f"### 📊 成交额排行图\n"
+            for i, chart_url in enumerate(chart_urls):
+                if i == 0:
+                    content += f"![成交额排行-5亿以上]({chart_url})\n\n"
+                else:
+                    content += f"![成交额排行-1到5亿]({chart_url})\n\n"
+        
         if self.enable_trend_chart:
             trend_chart_urls = self.generate_trend_chart_urls(billion_alerts)
             print(f"[{self.get_current_time_str()}] 趋势图开关已开启，生成趋势图")
@@ -670,9 +690,19 @@ class OKXVolumeMonitor:
             print(f"[{self.get_current_time_str()}] 趋势图开关已关闭，跳过趋势图生成")
         
         # 添加图表（只有在开关开启且生成成功时才添加）
+        # if self.enable_bar_chart and chart_url:
+        #     content += f"### 📊 成交额排行图\n"
+        #     content += f"![成交额排行]({chart_url})\n\n"
+
+        # 添加图表（只有在开关开启且生成成功时才添加）
         if self.enable_bar_chart and chart_urls:
             content += f"### 📊 成交额排行图\n"
-            content += f"![成交额排行]({chart_urls})\n\n"
+            for i, chart_url in enumerate(chart_urls):
+                if i == 0:
+                    content += f"![成交额排行-5亿以上]({chart_url})\n\n"
+                else:
+                    content += f"![成交额排行-1到5亿]({chart_url})\n\n"
+                    
         
         if self.enable_trend_chart and trend_chart_urls:
             content += f"### 📈 成交额趋势图\n"
