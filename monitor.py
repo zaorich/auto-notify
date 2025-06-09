@@ -288,8 +288,8 @@ class OKXVolumeMonitor:
                     # 当前交易额来源：最新4小时K线的volCcyQuote字段（four_hour_data[0][7]）
                     current_volume = float(four_hour_data[0][7])
                     
-                    # 4小时爆量标准：5倍
-                    if prev_ratio >= 5 or ma10_ratio >= 5:
+                    # 4小时爆量标准：5倍  修改成4倍
+                    if prev_ratio >= 4 or ma10_ratio >= 4:
                         alert_data = {
                             'inst_id': inst_id,
                             'timeframe': '4H',
