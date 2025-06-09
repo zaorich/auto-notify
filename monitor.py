@@ -113,6 +113,11 @@ class OKXVolumeMonitor:
                 'bar': bar,
                 'limit': limit
             }
+
+             # 如果是日线数据，添加UTC+8时区参数
+            if bar == '1D':
+                # 设置UTC+8时区，早上8点作为一天的开始
+                params['utc'] = '8'
             
             response = self.safe_request_with_retry(url, params=params)
             if not response:
