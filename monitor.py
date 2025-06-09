@@ -294,8 +294,8 @@ class OKXVolumeMonitor:
                             'inst_id': inst_id,
                             'timeframe': '4H',
                             'current_volume': current_volume,
-                            'prev_ratio': prev_ratio if prev_ratio >= 5 else None,
-                            'ma10_ratio': ma10_ratio if ma10_ratio >= 5 else None,
+                            'prev_ratio': prev_ratio if prev_ratio >= 4 else None,
+                            'ma10_ratio': ma10_ratio if ma10_ratio >= 4 else None,
                             'daily_volume': daily_volume,
                             'past_3days_volumes': past_3days_volumes,
                             'price_change_24h': price_change_24h  # 添加涨跌幅
