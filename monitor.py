@@ -225,6 +225,7 @@ class OKXVolumeMonitor:
             print(f"[{self.get_current_time_str()}] 获取{inst_id}当天交易额时出错: {e}")
             return 0
     
+     # 1. 修改 check_single_instrument_volume 方法，添加价格变化计算
     def check_single_instrument_volume(self, inst_id):
         """检查单个交易对是否出现爆量和过亿成交"""
         alerts = []
@@ -237,6 +238,15 @@ class OKXVolumeMonitor:
             # 获取过去3天的交易额数据（用于表格显示）
             past_3days_volumes = self.get_daily_volumes_history(inst_id, 3)
             
+            # 获取24小时K线数据计算涨跌幅
+            daily_klines = self.get_kline_data(inst_id, '1H', 24)
+            price_change_24h = 0
+            if daily_klines and len(daily_klines) >= 24:
+                current_price = float(daily_klines[0][4])  # 最新收盘价
+                price_24h_ago = float(daily_klines[23][4])  # 24小时前收盘价
+                if price_24h_ago > 0:
+                    price_change_24h = (current_price - price_24h_ago) / price_24h_ago * 100
+            
             # 检查是否过亿
             if daily_volume >= 100_000_000:  # 1亿USDT
                 # 获取过去7天的日交易额历史
@@ -244,7 +254,8 @@ class OKXVolumeMonitor:
                 billion_alert = {
                     'inst_id': inst_id,
                     'current_daily_volume': daily_volume,
-                    'daily_volumes_history': daily_volumes_history
+                    'daily_volumes_history': daily_volumes_history,
+                    'price_change_24h': price_change_24h  # 添加涨跌幅
                 }
             
             # 检查1小时爆量
@@ -260,19 +271,14 @@ class OKXVolumeMonitor:
                         alert_data = {
                             'inst_id': inst_id,
                             'timeframe': '1H',
-                            'current_volume': current_volume,  # 来自最新1小时K线的volCcyQuote字段
+                            'current_volume': current_volume,
                             'prev_ratio': prev_ratio if prev_ratio >= 10 else None,
                             'ma10_ratio': ma10_ratio if ma10_ratio >= 10 else None,
-                            'daily_volume': daily_volume,  # 来自get_daily_volume方法（24小时内所有1小时K线volCcyQuote之和）
-                            'past_3days_volumes': past_3days_volumes  # 新增：过去3天交易额
+                            'daily_volume': daily_volume,
+                            'past_3days_volumes': past_3days_volumes,
+                            'price_change_24h': price_change_24h  # 添加涨跌幅
                         }
                         alerts.append(alert_data)
-                        
-                        # 添加详细日志
-                        print(f"[{self.get_current_time_str()}] 1H爆量检测 {inst_id}: "
-                              f"当前小时交易额={self.format_volume(current_volume)}(K线volCcyQuote[7]), "
-                              f"当天总交易额={self.format_volume(daily_volume)}(24小时K线volCcyQuote之和), "
-                              f"相比上期={prev_ratio:.1f}x, 相比MA10={ma10_ratio:.1f}x")
             
             # 检查4小时爆量
             four_hour_data = self.get_kline_data(inst_id, '4H', 20)
@@ -287,19 +293,14 @@ class OKXVolumeMonitor:
                         alert_data = {
                             'inst_id': inst_id,
                             'timeframe': '4H',
-                            'current_volume': current_volume,  # 来自最新4小时K线的volCcyQuote字段
+                            'current_volume': current_volume,
                             'prev_ratio': prev_ratio if prev_ratio >= 5 else None,
                             'ma10_ratio': ma10_ratio if ma10_ratio >= 5 else None,
-                            'daily_volume': daily_volume,  # 来自get_daily_volume方法（24小时内所有1小时K线volCcyQuote之和）
-                            'past_3days_volumes': past_3days_volumes  # 新增：过去3天交易额
+                            'daily_volume': daily_volume,
+                            'past_3days_volumes': past_3days_volumes,
+                            'price_change_24h': price_change_24h  # 添加涨跌幅
                         }
                         alerts.append(alert_data)
-                        
-                        # 添加详细日志
-                        print(f"[{self.get_current_time_str()}] 4H爆量检测 {inst_id}: "
-                              f"当前4小时交易额={self.format_volume(current_volume)}(K线volCcyQuote[7]), "
-                              f"当天总交易额={self.format_volume(daily_volume)}(24小时K线volCcyQuote之和), "
-                              f"相比上期={prev_ratio:.1f}x, 相比MA10={ma10_ratio:.1f}x")
             
             return alerts, billion_alert
             
@@ -650,6 +651,7 @@ class OKXVolumeMonitor:
    
     
     # 修改 create_billion_volume_table 方法，添加开关控制
+    # 2. 修改 create_billion_volume_table 方法，添加涨跌幅列
     def create_billion_volume_table(self, billion_alerts):
         """创建过亿成交额的表格格式消息"""
         if not billion_alerts:
@@ -660,16 +662,6 @@ class OKXVolumeMonitor:
         
         content = "## 💰 日成交过亿信号\n\n"
         
-        # # 根据开关决定是否生成图表
-        # chart_url = None
-        # trend_chart_urls = []
-        
-        # if self.enable_bar_chart:
-        #     chart_url = self.generate_chart_url_quickchart(billion_alerts)
-        #     print(f"[{self.get_current_time_str()}] 柱状图开关已开启，生成柱状图")
-        # else:
-        #     print(f"[{self.get_current_time_str()}] 柱状图开关已关闭，跳过柱状图生成")
-
         chart_urls = []
         trend_chart_urls = []
         
@@ -694,30 +686,24 @@ class OKXVolumeMonitor:
         else:
             print(f"[{self.get_current_time_str()}] 趋势图开关已关闭，跳过趋势图生成")
         
-        # 添加图表（只有在开关开启且生成成功时才添加）
-        # if self.enable_bar_chart and chart_url:
-        #     content += f"### 📊 成交额排行图\n"
-        #     content += f"![成交额排行]({chart_url})\n\n"
-                 
-        
         if self.enable_trend_chart and trend_chart_urls:
             content += f"### 📈 成交额趋势图\n"
             for i, trend_url in enumerate(trend_chart_urls):
                 content += f"![成交额趋势第{i+1}组]({trend_url})\n\n"
         
-        # 构建表头
+        # 构建表头（添加涨跌幅列）
         header = "### 📋 详细数据表格\n\n"
-        header += "| 交易对 | 当天成交额 |"
-        separator = "|--------|------------|"
+        header += "| 交易对 | 当天成交额 | 24H涨跌幅 |"
+        separator = "|--------|------------|-----------|"
         
         # 获取最多的历史天数
         max_history_days = 0
         for alert in billion_alerts:
             if alert['daily_volumes_history']:
-                max_history_days = max(max_history_days, len(alert['daily_volumes_history']) - 1)  # 减1因为第一个是当天
+                max_history_days = max(max_history_days, len(alert['daily_volumes_history']) - 1)
         
         # 添加历史日期的表头
-        for i in range(1, min(max_history_days + 1, 7)):  # 最多显示过去6天
+        for i in range(1, min(max_history_days + 1, 7)):
             if billion_alerts[0]['daily_volumes_history'] and len(billion_alerts[0]['daily_volumes_history']) > i:
                 date = billion_alerts[0]['daily_volumes_history'][i]['date']
                 header += f" {date} |"
@@ -726,12 +712,21 @@ class OKXVolumeMonitor:
         content += header + "\n"
         content += separator + "\n"
         
-        # 填充数据
+        # 填充数据（添加涨跌幅数据）
         for alert in billion_alerts:
             inst_id = alert['inst_id']
             current_vol = self.format_volume(alert['current_daily_volume'])
+            price_change = alert.get('price_change_24h', 0)
             
-            row = f"| {inst_id} | **{current_vol}** |"
+            # 格式化涨跌幅显示
+            if price_change > 0:
+                price_change_str = f"📈+{price_change:.2f}%"
+            elif price_change < 0:
+                price_change_str = f"📉{price_change:.2f}%"
+            else:
+                price_change_str = "➖0.00%"
+            
+            row = f"| {inst_id} | **{current_vol}** | {price_change_str} |"
             
             # 添加历史数据
             history = alert['daily_volumes_history']
@@ -747,6 +742,7 @@ class OKXVolumeMonitor:
         content += "\n"
         return content
     
+    # 3. 修改 create_alert_table 方法，添加涨跌幅列
     def create_alert_table(self, alerts):
         """创建爆量警报的表格格式消息"""
         if not alerts:
@@ -764,13 +760,22 @@ class OKXVolumeMonitor:
         
         if hour_alerts:
             content += "## 🔥 1小时爆量信号\n\n"
-            content += "| 交易对 | 当前交易额 | 相比上期 | 相比MA10 | 当天总额 | 昨天 | 前天 | 3天前 |\n"
-            content += "|--------|------------|----------|----------|----------|------|------|------|\n"
+            content += "| 交易对 | 当前交易额 | 24H涨跌幅 | 相比上期 | 相比MA10 | 当天总额 | 昨天 | 前天 | 3天前 |\n"
+            content += "|--------|------------|-----------|----------|----------|----------|------|------|------|\n"
             
             for alert in hour_alerts:
                 inst_id = alert['inst_id']
                 current_vol = self.format_volume(alert['current_volume'])
                 daily_vol = self.format_volume(alert['daily_volume'])
+                price_change = alert.get('price_change_24h', 0)
+                
+                # 格式化涨跌幅显示
+                if price_change > 0:
+                    price_change_str = f"📈+{price_change:.2f}%"
+                elif price_change < 0:
+                    price_change_str = f"📉{price_change:.2f}%"
+                else:
+                    price_change_str = "➖0.00%"
                 
                 prev_ratio_str = f"{alert['prev_ratio']:.1f}x 📈" if alert['prev_ratio'] else "-"
                 ma10_ratio_str = f"{alert['ma10_ratio']:.1f}x 📈" if alert['ma10_ratio'] else "-"
@@ -781,19 +786,28 @@ class OKXVolumeMonitor:
                 day2_vol = self.format_volume(past_volumes[1]['volume']) if len(past_volumes) > 1 else "-"
                 day3_vol = self.format_volume(past_volumes[2]['volume']) if len(past_volumes) > 2 else "-"
                 
-                content += f"| {inst_id} | {current_vol} | {prev_ratio_str} | {ma10_ratio_str} | {daily_vol} | {day1_vol} | {day2_vol} | {day3_vol} |\n"
+                content += f"| {inst_id} | {current_vol} | {price_change_str} | {prev_ratio_str} | {ma10_ratio_str} | {daily_vol} | {day1_vol} | {day2_vol} | {day3_vol} |\n"
             
             content += "\n"
         
         if four_hour_alerts:
             content += "## 🚀 4小时爆量信号\n\n"
-            content += "| 交易对 | 当前交易额 | 相比上期 | 相比MA10 | 当天总额 | 昨天 | 前天 | 3天前 |\n"
-            content += "|--------|------------|----------|----------|----------|------|------|------|\n"
+            content += "| 交易对 | 当前交易额 | 24H涨跌幅 | 相比上期 | 相比MA10 | 当天总额 | 昨天 | 前天 | 3天前 |\n"
+            content += "|--------|------------|-----------|----------|----------|----------|------|------|------|\n"
             
             for alert in four_hour_alerts:
                 inst_id = alert['inst_id']
                 current_vol = self.format_volume(alert['current_volume'])
                 daily_vol = self.format_volume(alert['daily_volume'])
+                price_change = alert.get('price_change_24h', 0)
+                
+                # 格式化涨跌幅显示
+                if price_change > 0:
+                    price_change_str = f"📈+{price_change:.2f}%"
+                elif price_change < 0:
+                    price_change_str = f"📉{price_change:.2f}%"
+                else:
+                    price_change_str = "➖0.00%"
                 
                 prev_ratio_str = f"{alert['prev_ratio']:.1f}x 📈" if alert['prev_ratio'] else "-"
                 ma10_ratio_str = f"{alert['ma10_ratio']:.1f}x 📈" if alert['ma10_ratio'] else "-"
@@ -804,7 +818,7 @@ class OKXVolumeMonitor:
                 day2_vol = self.format_volume(past_volumes[1]['volume']) if len(past_volumes) > 1 else "-"
                 day3_vol = self.format_volume(past_volumes[2]['volume']) if len(past_volumes) > 2 else "-"
                 
-                content += f"| {inst_id} | {current_vol} | {prev_ratio_str} | {ma10_ratio_str} | {daily_vol} | {day1_vol} | {day2_vol} | {day3_vol} |\n"
+                content += f"| {inst_id} | {current_vol} | {price_change_str} | {prev_ratio_str} | {ma10_ratio_str} | {daily_vol} | {day1_vol} | {day2_vol} | {day3_vol} |\n"
             
             content += "\n"
         
