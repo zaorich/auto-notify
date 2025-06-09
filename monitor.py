@@ -970,13 +970,41 @@ class OKXVolumeMonitor:
         has_any_signal = has_volume_alerts or has_billion_alerts
         
         if has_any_signal:
-            # 构建标题
+             # 筛选符合条件的币种（1小时爆量超过1000万或4小时爆量超过2000万）
+            high_volume_coins = []
+            for alert in all_alerts:
+                inst_name = alert['inst_id'].replace('-SWAP', '').replace('-USDT', '')
+                current_volume = alert['current_volume']
+                timeframe = alert['timeframe']
+                
+                # 检查是否符合条件
+                if (timeframe == '1H' and current_volume >= 10_000_000) or \
+                   (timeframe == '4H' and current_volume >= 20_000_000):
+                    if inst_name not in high_volume_coins:
+                        high_volume_coins.append(inst_name)
+             # 构建标题
             if has_volume_alerts and has_billion_alerts:
-                title = f"🚨 OKX监控 - {len(all_alerts)}个爆量+{len(all_billion_alerts)}个过亿"
+                base_title = f"🚨 OKX监控 - {len(all_alerts)}个爆量+{len(all_billion_alerts)}个过亿"
+                if high_volume_coins:
+                    title = f"{base_title} ({'/'.join(high_volume_coins)})"
+                else:
+                    title = base_title
             elif has_volume_alerts:
-                title = f"🚨 OKX监控 - 发现{len(all_alerts)}个爆量信号"
+                base_title = f"🚨 OKX监控 - 发现{len(all_alerts)}个爆量信号"
+                if high_volume_coins:
+                    title = f"{base_title} ({'/'.join(high_volume_coins)})"
+                else:
+                    title = base_title
             else:
                 title = f"💰 OKX监控 - 发现{len(all_billion_alerts)}个过亿信号"
+                
+            # # 构建标题
+            # if has_volume_alerts and has_billion_alerts:
+            #     title = f"🚨 OKX监控 - {len(all_alerts)}个爆量+{len(all_billion_alerts)}个过亿"
+            # elif has_volume_alerts:
+            #     title = f"🚨 OKX监控 - 发现{len(all_alerts)}个爆量信号"
+            # else:
+            #     title = f"💰 OKX监控 - 发现{len(all_billion_alerts)}个过亿信号"
             
             content = f"**监控时间**: {self.get_current_time_str()}\n"
             content += f"**监控范围**: {len(instruments)} 个交易对\n\n"
