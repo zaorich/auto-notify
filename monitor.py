@@ -398,7 +398,8 @@ class OKXVolumeMonitor:
                     above_10b.append(alert)
                 elif volume >= 3_000_000_000:  # 30亿USDT
                     between_3_10b.append(alert)
-                elif volume >= 1_000_000_000:  # 10亿USDT (这个条件其实总是满足，因为billion_alerts已经是过亿的)
+                #elif volume >= 1_000_000_000:  # 10亿USDT (这个条件其实总是满足，因为billion_alerts已经是过亿的)
+                else:
                     between_1_3b.append(alert)
             
             chart_urls = []
