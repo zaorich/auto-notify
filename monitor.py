@@ -394,9 +394,9 @@ class OKXVolumeMonitor:
             
             for alert in all_alerts:
                 volume = alert['current_daily_volume']
-                if volume >= 10_000_000_000:  # 100亿USDT
+                if volume >= 1_000_000_000:  # 10亿USDT
                     above_10b.append(alert)
-                elif volume >= 3_000_000_000:  # 30亿USDT
+                elif volume >= 300_000_000:  # 3亿USDT
                     between_3_10b.append(alert)
                 #elif volume >= 1_000_000_000:  # 10亿USDT (这个条件其实总是满足，因为billion_alerts已经是过亿的)
                 else:
@@ -454,7 +454,7 @@ class OKXVolumeMonitor:
                         },
                         "scales": {
                             "y": {
-                                "beginAtZero": True,
+                                "beginAtZero": False,
                                 "title": {
                                     "display": True,
                                     "text": "成交额 (十亿USDT)"
@@ -519,7 +519,7 @@ class OKXVolumeMonitor:
                         },
                         "scales": {
                             "y": {
-                                "beginAtZero": True,
+                                "beginAtZero": False,
                                 "title": {
                                     "display": True,
                                     "text": "成交额 (十亿USDT)"
@@ -584,7 +584,7 @@ class OKXVolumeMonitor:
                         },
                         "scales": {
                             "y": {
-                                "beginAtZero": True,
+                                "beginAtZero": False,
                                 "title": {
                                     "display": True,
                                     "text": "成交额 (百万USDT)"
