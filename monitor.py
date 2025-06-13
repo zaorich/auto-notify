@@ -169,7 +169,7 @@ class OKXVolumeMonitor:
         """获取交易对过去N天的日交易额历史"""
         try:
             # 获取日K线数据
-            daily_klines = self.get_kline_data(inst_id, '1D', days)
+            daily_klines = self.get_kline_data(inst_id, '1Dutc', days)
             if daily_klines:
                 # 返回每天的交易额列表，按时间从近到远排序
                 daily_volumes = []
