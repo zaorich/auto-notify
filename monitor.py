@@ -486,14 +486,14 @@ class OKXVolumeMonitor:
                 for i, alert in enumerate(between_3_10b):
                     inst_name = alert['inst_id'].replace('-SWAP', '').replace('-USDT', '')
                     labels.append(inst_name)
-                    current_data.append(round(alert['current_daily_volume'] / 1_000_000_000, 2))  # 转换为十亿
+                    current_data.append(round(alert['current_daily_volume'] / 100_000_000, 2))  # 转换为亿
                 
                 chart_config = {
                     "type": "bar",
                     "data": {
                         "labels": labels,
                         "datasets": [{
-                            "label": "当天成交额 (十亿USDT)",
+                            "label": "当天成交额 (亿USDT)",
                             "data": current_data,
                             "backgroundColor": [colors[i % len(colors)] for i in range(len(between_3_10b))],
                             "borderColor": [colors[i % len(colors)] for i in range(len(between_3_10b))],
@@ -522,7 +522,7 @@ class OKXVolumeMonitor:
                                 "beginAtZero": False,
                                 "title": {
                                     "display": True,
-                                    "text": "成交额 (十亿USDT)"
+                                    "text": "成交额 (亿USDT)"
                                 }
                             },
                             "x": {
@@ -551,14 +551,14 @@ class OKXVolumeMonitor:
                 for i, alert in enumerate(between_1_3b):
                     inst_name = alert['inst_id'].replace('-SWAP', '').replace('-USDT', '')
                     labels.append(inst_name)
-                    current_data.append(round(alert['current_daily_volume'] / 1_000_000, 1))  # 转换为百万
+                    current_data.append(round(alert['current_daily_volume'] / 10_000_000, 1))  # 转换为千万
                 
                 chart_config = {
                     "type": "bar",
                     "data": {
                         "labels": labels,
                         "datasets": [{
-                            "label": "当天成交额 (百万USDT)",
+                            "label": "当天成交额 (千万USDT)",
                             "data": current_data,
                             "backgroundColor": [colors[i % len(colors)] for i in range(len(between_1_3b))],
                             "borderColor": [colors[i % len(colors)] for i in range(len(between_1_3b))],
@@ -587,7 +587,7 @@ class OKXVolumeMonitor:
                                 "beginAtZero": False,
                                 "title": {
                                     "display": True,
-                                    "text": "成交额 (百万USDT)"
+                                    "text": "成交额 (千万USDT)"
                                 }
                             },
                             "x": {
