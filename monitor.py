@@ -35,6 +35,12 @@ class OKXVolumeMonitor:
         self.request_delay = 0.2  # 请求间隔，200ms
         self.max_retries = 3  # 最大重试次数
 
+        # 新增：爆量信息开关配置
+        self.enable_volume_alerts = True  # 爆量信息总开关
+        self.volume_alert_daily_threshold = 50_000_000  # 当天成交额阈值：5000万USDT，可配置
+        # 也可以从环境变量读取：
+        # self.enable_volume_alerts = os.environ.get('ENABLE_VOLUME_ALERTS', 'true').lower() == 'true'
+        # self.volume_alert_daily_threshold = float(os.environ.get('VOLUME_ALERT_DAILY_THRESHOLD', '50000000'))
         # 新增：图表开关配置
         self.enable_bar_chart = True   # 或 False
         self.enable_trend_chart = True  # 或 True
@@ -180,14 +186,24 @@ class OKXVolumeMonitor:
         except Exception as e:
             print(f"[{self.get_current_time_str()}] 获取{inst_id}历史日交易额时出错: {e}")
             return []
-    
+
+    #should_send_volume_alert(self, alert)：检查是否应该发送爆量警报
+    def should_send_volume_alert(self, alert):
+        """检查是否应该发送爆量警报"""
+        if not self.enable_volume_alerts:
+            return False
+        
+        # 检查当天成交额是否超过阈值
+        daily_volume = alert.get('daily_volume', 0)
+        return daily_volume >= self.volume_alert_daily_threshold
+        
     def check_volume_explosion_batch(self, instruments_batch):
-        """批量检查多个交易对的爆量情况（修改版本）"""
+        """批量检查多个交易对的爆量情况（修改版本：添加阈值过滤）"""
         alerts = []
         billion_volume_alerts = []
         
         # 减少并发数，避免429错误
-        with ThreadPoolExecutor(max_workers=3) as executor:  # 从10改为3
+        with ThreadPoolExecutor(max_workers=3) as executor:
             # 提交所有任务
             future_to_inst = {
                 executor.submit(self.check_single_instrument_volume, inst['instId']): inst['instId'] 
@@ -198,13 +214,25 @@ class OKXVolumeMonitor:
             for future in future_to_inst:
                 inst_id = future_to_inst[future]
                 try:
-                    inst_alerts, billion_alert = future.result(timeout=60)  # 从30秒改为60秒
+                    inst_alerts, billion_alert = future.result(timeout=60)
+                    
+                    # 过滤爆量警报：只有通过阈值检查的才添加
                     if inst_alerts:
-                        alerts.extend(inst_alerts)
-                        print(f"[{self.get_current_time_str()}] 发现爆量: {inst_id}")
+                        filtered_alerts = []
+                        for alert in inst_alerts:
+                            if self.should_send_volume_alert(alert):
+                                filtered_alerts.append(alert)
+                                print(f"[{self.get_current_time_str()}] 发现爆量(通过阈值): {inst_id} 当天成交额: {self.format_volume(alert['daily_volume'])}")
+                            else:
+                                print(f"[{self.get_current_time_str()}] 发现爆量(未达阈值): {inst_id} 当天成交额: {self.format_volume(alert.get('daily_volume', 0))} < {self.format_volume(self.volume_alert_daily_threshold)}")
+                        
+                        if filtered_alerts:
+                            alerts.extend(filtered_alerts)
+                    
                     if billion_alert:
                         billion_volume_alerts.append(billion_alert)
                         print(f"[{self.get_current_time_str()}] 发现过亿成交: {inst_id}")
+                        
                 except Exception as e:
                     print(f"[{self.get_current_time_str()}] 检查 {inst_id} 时出错: {e}")
                     continue
@@ -825,7 +853,7 @@ class OKXVolumeMonitor:
         return content
     
     def send_heartbeat_notification(self, monitored_count):
-        """发送心跳监测消息"""
+        """发送心跳监测消息（修改版本：添加阈值信息）"""
         current_time = self.get_current_time_str()
         last_alert_time = self.get_last_alert_time()
         
@@ -840,7 +868,13 @@ class OKXVolumeMonitor:
             content += f"📈 监控交易对: {monitored_count} 个\n"
             content += f"⏰ 检查时间: {current_time}\n"
             content += f"🔕 距离上次爆量警报: {hours_since} 小时\n"
-            content += f"📅 上次警报时间: {last_alert_datetime.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            content += f"📅 上次警报时间: {last_alert_datetime.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            
+            # 添加配置信息
+            content += f"⚙️ 爆量开关: {'开启' if self.enable_volume_alerts else '关闭'}\n"
+            if self.enable_volume_alerts:
+                content += f"📊 爆量阈值: {self.format_volume(self.volume_alert_daily_threshold)}\n"
+            content += f"📈 图表配置: 柱状图{'✅' if self.enable_bar_chart else '❌'} 趋势图{'✅' if self.enable_trend_chart else '❌'}\n\n"
             content += f"💡 提示: 已连续 {hours_since} 小时无爆量信号"
         else:
             title = "OKX监控系统心跳 💓"
@@ -848,7 +882,13 @@ class OKXVolumeMonitor:
             content += f"📊 监控状态: 正常\n"
             content += f"📈 监控交易对: {monitored_count} 个\n"
             content += f"⏰ 检查时间: {current_time}\n"
-            content += f"🔕 暂无爆量警报记录\n\n"
+            content += f"🔕 暂无爆量警报记录\n"
+            
+            # 添加配置信息
+            content += f"⚙️ 爆量开关: {'开启' if self.enable_volume_alerts else '关闭'}\n"
+            if self.enable_volume_alerts:
+                content += f"📊 爆量阈值: {self.format_volume(self.volume_alert_daily_threshold)}\n"
+            content += f"📈 图表配置: 柱状图{'✅' if self.enable_bar_chart else '❌'} 趋势图{'✅' if self.enable_trend_chart else '❌'}\n\n"
             content += f"💡 提示: 系统首次运行或记录文件不存在"
         
         success = self.send_notification(title, content)
@@ -919,6 +959,9 @@ class OKXVolumeMonitor:
     def run_monitor(self):
         """运行监控主程序（修改版本）"""
         print(f"[{self.get_current_time_str()}] 开始监控")
+        print(f"[{self.get_current_time_str()}] 爆量信息开关: {'开启' if self.enable_volume_alerts else '关闭'}")
+        if self.enable_volume_alerts:
+            print(f"[{self.get_current_time_str()}] 爆量信息当天成交额阈值: {self.format_volume(self.volume_alert_daily_threshold)}")
         
         # 获取交易对列表
         instruments = self.get_perpetual_instruments()
@@ -1023,6 +1066,13 @@ class OKXVolumeMonitor:
             content += "---\n\n"
             content += "**说明**:\n"
             content += "- **爆量信号**: 1H需10倍增长，4H需5倍增长\n"
+            # 添加阈值说明
+            if self.enable_volume_alerts:
+                content += f"- **爆量阈值**: 当天成交额需超过{self.format_volume(self.volume_alert_daily_threshold)}\n"
+            else:
+                content += "- **爆量信息**: 已关闭\n"
+            
+            content += "- **过亿信号**: 当天成交额超过1亿USDT\n"
             content += "- **过亿信号**: 当天成交额超过1亿USDT\n"
             content += "- **相比上期**: 与上一个同周期的交易额对比\n"
             content += "- **相比MA10**: 与过去10个周期平均值对比\n"
