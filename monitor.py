@@ -1101,70 +1101,70 @@ class OKXVolumeMonitor:
                 print(f"[{self.get_current_time_str()}] 处理第 {batch_index} 批时出错: {e}")
                 continue
         
-           # 检查是否需要发送通知
-            has_volume_alerts = len(all_alerts) > 0
-            has_billion_alerts = len(all_billion_alerts) > 0
+       # 检查是否需要发送通知
+        has_volume_alerts = len(all_alerts) > 0
+        has_billion_alerts = len(all_billion_alerts) > 0
+        
+        # 修改过亿信号的发送逻辑
+        should_send_billion_alert = False
+        if has_billion_alerts:
+            if self.enable_billion_new_only:
+                # 开启新增判断：只有当有新增币种时才发送
+                should_send_billion_alert = self.has_new_billion_pairs(all_billion_alerts)
+                if not should_send_billion_alert:
+                    print(f"[{self.get_current_time_str()}] 过亿币种无新增，跳过发送过亿信号")
+            else:
+                # 关闭新增判断：只要与上次不完全相同就发送（原有逻辑）
+                should_send_billion_alert = not self.is_billion_pairs_same_as_last(all_billion_alerts)
+                if not should_send_billion_alert:
+                    current_pairs = [alert['inst_id'] for alert in all_billion_alerts]
+                    print(f"[{self.get_current_time_str()}] 过亿交易对与上次完全相同 ({', '.join(current_pairs)})，跳过发送")
+        
+        # 发送汇总通知
+        has_any_signal = has_volume_alerts or should_send_billion_alert
+        
+        if has_any_signal:
+            # 筛选符合条件的币种（1小时爆量超过1000万或4小时爆量超过2000万）
+            high_volume_coins = []
+            for alert in all_alerts:
+                inst_name = alert['inst_id'].replace('-SWAP', '').replace('-USDT', '')
+                current_volume = alert['current_volume']
+                timeframe = alert['timeframe']
+                
+                # 检查是否符合条件
+                if (timeframe == '1H' and current_volume >= 10_000_000) or \
+                   (timeframe == '4H' and current_volume >= 20_000_000):
+                    if inst_name not in high_volume_coins:
+                        high_volume_coins.append(inst_name)
             
-            # 修改过亿信号的发送逻辑
-            should_send_billion_alert = False
-            if has_billion_alerts:
-                if self.enable_billion_new_only:
-                    # 开启新增判断：只有当有新增币种时才发送
-                    should_send_billion_alert = self.has_new_billion_pairs(all_billion_alerts)
-                    if not should_send_billion_alert:
-                        print(f"[{self.get_current_time_str()}] 过亿币种无新增，跳过发送过亿信号")
+            # 构建标题
+            if has_volume_alerts and should_send_billion_alert:
+                base_title = f"🚨 OKX监控 - {len(all_alerts)}个爆量+{len(all_billion_alerts)}个过亿"
+                if high_volume_coins:
+                    title = f"{base_title} ({'/'.join(high_volume_coins)})"
                 else:
-                    # 关闭新增判断：只要与上次不完全相同就发送（原有逻辑）
-                    should_send_billion_alert = not self.is_billion_pairs_same_as_last(all_billion_alerts)
-                    if not should_send_billion_alert:
-                        current_pairs = [alert['inst_id'] for alert in all_billion_alerts]
-                        print(f"[{self.get_current_time_str()}] 过亿交易对与上次完全相同 ({', '.join(current_pairs)})，跳过发送")
-            
-            # 发送汇总通知
-            has_any_signal = has_volume_alerts or should_send_billion_alert
-            
-            if has_any_signal:
-                # 筛选符合条件的币种（1小时爆量超过1000万或4小时爆量超过2000万）
-                high_volume_coins = []
-                for alert in all_alerts:
-                    inst_name = alert['inst_id'].replace('-SWAP', '').replace('-USDT', '')
-                    current_volume = alert['current_volume']
-                    timeframe = alert['timeframe']
-                    
-                    # 检查是否符合条件
-                    if (timeframe == '1H' and current_volume >= 10_000_000) or \
-                       (timeframe == '4H' and current_volume >= 20_000_000):
-                        if inst_name not in high_volume_coins:
-                            high_volume_coins.append(inst_name)
-                
-                # 构建标题
-                if has_volume_alerts and should_send_billion_alert:
-                    base_title = f"🚨 OKX监控 - {len(all_alerts)}个爆量+{len(all_billion_alerts)}个过亿"
-                    if high_volume_coins:
-                        title = f"{base_title} ({'/'.join(high_volume_coins)})"
-                    else:
-                        title = base_title
-                elif has_volume_alerts:
-                    base_title = f"🚨 OKX监控 - 发现{len(all_alerts)}个爆量信号"
-                    if high_volume_coins:
-                        title = f"{base_title} ({'/'.join(high_volume_coins)})"
-                    else:
-                        title = base_title
+                    title = base_title
+            elif has_volume_alerts:
+                base_title = f"🚨 OKX监控 - 发现{len(all_alerts)}个爆量信号"
+                if high_volume_coins:
+                    title = f"{base_title} ({'/'.join(high_volume_coins)})"
                 else:
-                    title = f"💰 OKX监控 - 发现{len(all_billion_alerts)}个过亿信号"
-                    
-                content = f"**监控时间**: {self.get_current_time_str()}\n"
-                content += f"**监控范围**: {len(instruments)} 个交易对\n\n"
+                    title = base_title
+            else:
+                title = f"💰 OKX监控 - 发现{len(all_billion_alerts)}个过亿信号"
                 
-                # 先创建爆量表格
-                if all_alerts:
-                    table_content = self.create_alert_table(all_alerts)
-                    content += table_content
-                
-                # 再创建过亿成交额表格（只有在should_send_billion_alert为True时才添加）
-                if should_send_billion_alert:
-                    billion_table_content = self.create_billion_volume_table(all_billion_alerts)
-                    content += billion_table_content
+            content = f"**监控时间**: {self.get_current_time_str()}\n"
+            content += f"**监控范围**: {len(instruments)} 个交易对\n\n"
+            
+            # 先创建爆量表格
+            if all_alerts:
+                table_content = self.create_alert_table(all_alerts)
+                content += table_content
+            
+            # 再创建过亿成交额表格（只有在should_send_billion_alert为True时才添加）
+            if should_send_billion_alert:
+                billion_table_content = self.create_billion_volume_table(all_billion_alerts)
+                content += billion_table_content
             
             # 添加说明（根据开关状态调整说明内容）
             content += "---\n\n"
