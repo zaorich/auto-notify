@@ -1061,178 +1061,200 @@ class OKXVolumeMonitor:
     
 
     def run_monitor(self):
-        """运行监控主程序（修改版本）"""
-        print(f"[{self.get_current_time_str()}] 开始监控")
-        print(f"[{self.get_current_time_str()}] 爆量信息开关: {'开启' if self.enable_volume_alerts else '关闭'}")
-        if self.enable_volume_alerts:
-            print(f"[{self.get_current_time_str()}] 爆量信息当天成交额阈值: {self.format_volume(self.volume_alert_daily_threshold)}")
-        # 新增：显示过亿新增判断开关状态
-        print(f"[{self.get_current_time_str()}] 过亿新增判断开关: {'开启' if self.enable_billion_new_only else '关闭'}")
+    """运行监控主程序（修改版本）"""
+    print(f"[{self.get_current_time_str()}] 开始监控")
+    print(f"[{self.get_current_time_str()}] 爆量信息开关: {'开启' if self.enable_volume_alerts else '关闭'}")
+    if self.enable_volume_alerts:
+        print(f"[{self.get_current_time_str()}] 爆量信息当天成交额阈值: {self.format_volume(self.volume_alert_daily_threshold)}")
+    # 新增：显示过亿新增判断开关状态
+    print(f"[{self.get_current_time_str()}] 过亿新增判断开关: {'开启' if self.enable_billion_new_only else '关闭'}")
+
+    # 获取交易对列表
+    instruments = self.get_perpetual_instruments()
+    if not instruments:
+        print(f"[{self.get_current_time_str()}] 未能获取交易对列表，退出监控")
+        return
     
-        # 获取交易对列表
-        instruments = self.get_perpetual_instruments()
-        if not instruments:
-            print(f"[{self.get_current_time_str()}] 未能获取交易对列表，退出监控")
-            return
+    # 监控所有活跃的交易对，分批处理
+    batch_size = 30
+    total_batches = (len(instruments) + batch_size - 1) // batch_size
+    print(f"[{self.get_current_time_str()}] 开始监控所有 {len(instruments)} 个交易对，分 {total_batches} 批处理")
+    
+    all_alerts = []
+    all_billion_alerts = []
+    
+    # 分批处理交易对
+    for batch_num in range(0, len(instruments), batch_size):
+        batch = instruments[batch_num:batch_num + batch_size]
+        batch_index = batch_num // batch_size + 1
         
-        # 监控所有活跃的交易对，分批处理
-        batch_size = 30
-        total_batches = (len(instruments) + batch_size - 1) // batch_size
-        print(f"[{self.get_current_time_str()}] 开始监控所有 {len(instruments)} 个交易对，分 {total_batches} 批处理")
+        print(f"[{self.get_current_time_str()}] 处理第 {batch_index}/{total_batches} 批 ({len(batch)} 个交易对)")
         
-        all_alerts = []
-        all_billion_alerts = []
-        
-        # 分批处理交易对
-        for batch_num in range(0, len(instruments), batch_size):
-            batch = instruments[batch_num:batch_num + batch_size]
-            batch_index = batch_num // batch_size + 1
+        try:
+            batch_alerts, batch_billion_alerts = self.check_volume_explosion_batch(batch)
+            all_alerts.extend(batch_alerts)
+            all_billion_alerts.extend(batch_billion_alerts)
             
-            print(f"[{self.get_current_time_str()}] 处理第 {batch_index}/{total_batches} 批 ({len(batch)} 个交易对)")
-            
-            try:
-                batch_alerts, batch_billion_alerts = self.check_volume_explosion_batch(batch)
-                all_alerts.extend(batch_alerts)
-                all_billion_alerts.extend(batch_billion_alerts)
+            # 批次间添加更长延迟2秒
+            if batch_index < total_batches:
+                print(f"[{self.get_current_time_str()}] 批次间等待2秒...")
+                time.sleep(2)
                 
-                # 批次间添加更长延迟2秒
-                if batch_index < total_batches:
-                    print(f"[{self.get_current_time_str()}] 批次间等待2秒...")
-                    time.sleep(2)
-                    
-            except Exception as e:
-                print(f"[{self.get_current_time_str()}] 处理第 {batch_index} 批时出错: {e}")
-                continue
+        except Exception as e:
+            print(f"[{self.get_current_time_str()}] 处理第 {batch_index} 批时出错: {e}")
+            continue
+    
+   # 检查是否需要发送通知
+    has_volume_alerts = len(all_alerts) > 0
+    has_billion_alerts = len(all_billion_alerts) > 0
+    
+    # 修改过亿信号的发送逻辑
+    should_send_billion_alert = False
+    new_billion_coins = []  # 新增：用于存储新增的过亿币种名称
+    has_new_billion = False  # 新增：标记是否有新增过亿币种
+    
+    if has_billion_alerts:
+        if self.enable_billion_new_only:
+            # 开启新增判断：只有当有新增币种时才发送
+            should_send_billion_alert, new_billion_coins = self.has_new_billion_pairs(all_billion_alerts)
+            has_new_billion = should_send_billion_alert
+            # 修改：如果有爆量信息，不管是否有新增都输出过亿信息
+            if has_volume_alerts:
+                should_send_billion_alert = True
+                print(f"[{self.get_current_time_str()}] 因有爆量信息，强制输出过亿信息（新增判断：{'有' if has_new_billion else '无'}新增）")
+            elif not should_send_billion_alert:
+                print(f"[{self.get_current_time_str()}] 过亿币种无新增，跳过发送过亿信号")
+        else:
+            # 关闭新增判断：只要与上次不完全相同就发送（原有逻辑）
+            should_send_billion_alert = not self.is_billion_pairs_same_as_last(all_billion_alerts)
+            # 检查是否有新增（用于标题显示）
+            has_new_billion, new_billion_coins = self.has_new_billion_pairs(all_billion_alerts)
+            if not should_send_billion_alert:
+                current_pairs = [alert['inst_id'] for alert in all_billion_alerts]
+                print(f"[{self.get_current_time_str()}] 过亿交易对与上次完全相同 ({', '.join(current_pairs)})，跳过发送")
+    
+    # 发送汇总通知
+    has_any_signal = has_volume_alerts or should_send_billion_alert
+    
+    if has_any_signal:
+        # 筛选符合条件的币种（1小时爆量超过1000万或4小时爆量超过2000万）
+        high_volume_coins = []
+        for alert in all_alerts:
+            inst_name = alert['inst_id'].replace('-SWAP', '').replace('-USDT', '')
+            current_volume = alert['current_volume']
+            timeframe = alert['timeframe']
+            
+            # 检查是否符合条件
+            if (timeframe == '1H' and current_volume >= 10_000_000) or \
+               (timeframe == '4H' and current_volume >= 20_000_000):
+                if inst_name not in high_volume_coins:
+                    high_volume_coins.append(inst_name)
         
-       # 检查是否需要发送通知
-        has_volume_alerts = len(all_alerts) > 0
-        has_billion_alerts = len(all_billion_alerts) > 0
-        
-        # 修改过亿信号的发送逻辑
-        should_send_billion_alert = False
-        new_billion_coins = []  # 新增：用于存储新增的过亿币种名称
-        
-        if has_billion_alerts:
-            if self.enable_billion_new_only:
-                # 开启新增判断：只有当有新增币种时才发送
-                should_send_billion_alert, new_billion_coins = self.has_new_billion_pairs(all_billion_alerts)
-                if not should_send_billion_alert:
-                    print(f"[{self.get_current_time_str()}] 过亿币种无新增，跳过发送过亿信号")
+        # 构建标题
+        if has_volume_alerts and should_send_billion_alert:
+            base_title = f"🚨 OKX监控 - {len(all_alerts)}个爆量+{len(all_billion_alerts)}个过亿"
+            if high_volume_coins:
+                title = f"{base_title} ({'/'.join(high_volume_coins)})"
             else:
-                # 关闭新增判断：只要与上次不完全相同就发送（原有逻辑）
-                should_send_billion_alert = not self.is_billion_pairs_same_as_last(all_billion_alerts)
-                if not should_send_billion_alert:
-                    current_pairs = [alert['inst_id'] for alert in all_billion_alerts]
-                    print(f"[{self.get_current_time_str()}] 过亿交易对与上次完全相同 ({', '.join(current_pairs)})，跳过发送")
-        
-        # 发送汇总通知
-        has_any_signal = has_volume_alerts or should_send_billion_alert
-        
-        if has_any_signal:
-            # 筛选符合条件的币种（1小时爆量超过1000万或4小时爆量超过2000万）
-            high_volume_coins = []
-            for alert in all_alerts:
-                inst_name = alert['inst_id'].replace('-SWAP', '').replace('-USDT', '')
-                current_volume = alert['current_volume']
-                timeframe = alert['timeframe']
-                
-                # 检查是否符合条件
-                if (timeframe == '1H' and current_volume >= 10_000_000) or \
-                   (timeframe == '4H' and current_volume >= 20_000_000):
-                    if inst_name not in high_volume_coins:
-                        high_volume_coins.append(inst_name)
-            
-            # 构建标题
-            if has_volume_alerts and should_send_billion_alert:
-                base_title = f"🚨 OKX监控 - {len(all_alerts)}个爆量+{len(all_billion_alerts)}个过亿"
-                if high_volume_coins:
-                    title = f"{base_title} ({'/'.join(high_volume_coins)})"
-                else:
-                    title = base_title
-                # 如果有新增过亿币种，添加到标题中
-                if new_billion_coins:
-                    title += f" 新增:{'/'.join(new_billion_coins)}"
-            elif has_volume_alerts:
-                base_title = f"🚨 OKX监控 - 发现{len(all_alerts)}个爆量信号"
-                if high_volume_coins:
-                    title = f"{base_title} ({'/'.join(high_volume_coins)})"
-                else:
-                    title = base_title
+                title = base_title
+            # 如果有新增过亿币种，添加到标题中
+            if has_new_billion and new_billion_coins:
+                title += f" 新增:{'/'.join(new_billion_coins)}"
+            elif has_billion_alerts:
+                title += " (无新增)"
+        elif has_volume_alerts:
+            base_title = f"🚨 OKX监控 - 发现{len(all_alerts)}个爆量信号"
+            if high_volume_coins:
+                title = f"{base_title} ({'/'.join(high_volume_coins)})"
             else:
-                base_title = f"💰 OKX监控 - 发现{len(all_billion_alerts)}个过亿信号"
-                # 如果有新增过亿币种，添加到标题中
-                if new_billion_coins:
-                    title = f"{base_title} 新增:{'/'.join(new_billion_coins)}"
+                title = base_title
+        else:
+            base_title = f"💰 OKX监控 - 发现{len(all_billion_alerts)}个过亿信号"
+            # 如果有新增过亿币种，添加到标题中
+            if has_new_billion and new_billion_coins:
+                title = f"{base_title} 新增:{'/'.join(new_billion_coins)}"
+            else:
+                title = base_title
+            
+        content = f"**监控时间**: {self.get_current_time_str()}\n"
+        content += f"**监控范围**: {len(instruments)} 个交易对\n\n"
+        
+        # 先创建爆量表格
+        if all_alerts:
+            table_content = self.create_alert_table(all_alerts)
+            content += table_content
+        
+        # 再创建过亿成交额表格（只有在should_send_billion_alert为True时才添加）
+        if should_send_billion_alert:
+            # 添加过亿信息标题，标注是否有新增
+            if has_volume_alerts and has_billion_alerts:
+                if has_new_billion:
+                    billion_title = "## 💰 过亿信息（有新增）\n"
                 else:
-                    title = base_title
-                
-            content = f"**监控时间**: {self.get_current_time_str()}\n"
-            content += f"**监控范围**: {len(instruments)} 个交易对\n\n"
-            
-            # 先创建爆量表格
-            if all_alerts:
-                table_content = self.create_alert_table(all_alerts)
-                content += table_content
-            
-            # 再创建过亿成交额表格（只有在should_send_billion_alert为True时才添加）
-            if should_send_billion_alert:
+                    billion_title = "## 💰 过亿信息（无新增）\n"
+                # 在过亿表格前添加标题
+                billion_table_content = self.create_billion_volume_table(all_billion_alerts)
+                # 替换原有的标题
+                billion_table_content = billion_table_content.replace("## 💰 日成交过亿信号\n\n", billion_title)
+                content += billion_table_content
+            else:
                 billion_table_content = self.create_billion_volume_table(all_billion_alerts)
                 content += billion_table_content
-            
-            # 添加说明（根据开关状态调整说明内容）
-            content += "---\n\n"
-            content += "**说明**:\n"
-            content += "- **爆量信号**: 1H需10倍增长，4H需5倍增长\n"
-            # 添加阈值说明
-            if self.enable_volume_alerts:
-                content += f"- **爆量阈值**: 当天成交额需超过{self.format_volume(self.volume_alert_daily_threshold)}\n"
-            else:
-                content += "- **爆量信息**: 已关闭\n"
-            
-            content += "- **过亿信号**: 当天成交额超过1亿USDT\n"
-            content += "- **过亿信号**: 当天成交额超过1亿USDT\n"
-            content += "- **相比上期**: 与上一个同周期的交易额对比\n"
-            content += "- **相比MA10**: 与过去10个周期平均值对比\n"
-            content += "- **当前交易额**: 1H为最新1小时K线volCcyQuote，4H为最新4小时K线volCcyQuote\n"
-            content += "- **当天总额**: 24小时内所有1小时K线volCcyQuote字段之和\n"
-            content += "- **K/M/B**: 千/百万/十亿 USDT\n"
-            
-            # 根据开关状态添加图表说明
-            if self.enable_bar_chart or self.enable_trend_chart:
-                content += "- **图表**: 由QuickChart.io生成"
-                if self.enable_bar_chart and self.enable_trend_chart:
-                    content += "，包含排行图和趋势对比图\n"
-                elif self.enable_bar_chart:
-                    content += "，仅显示排行图\n"
-                elif self.enable_trend_chart:
-                    content += "，仅显示趋势对比图\n"
-                
-                if self.enable_trend_chart:
-                    content += "- **趋势图**: 已排除BTC和ETH交易对，专注于其他币种\n"
-            else:
-                content += "- **图表**: 已关闭图表功能\n"
-            
-            content += f"- **图表配置**: 柱状图{'✅' if self.enable_bar_chart else '❌'} 趋势图{'✅' if self.enable_trend_chart else '❌'}"
-            
-            success = self.send_notification(title, content)
-            if success:
-                # 更新上次发送爆量警报的时间
-                self.update_last_alert_time()
-                # 如果发送了过亿信号，更新上次过亿交易对记录
-                if should_send_billion_alert:
-                    self.update_last_billion_pairs(all_billion_alerts)
-        else:
-            print(f"[{self.get_current_time_str()}] 未发现需要发送的信号")
-            
-            # 检查是否需要发送心跳消息
-            if self.should_send_heartbeat():
-                print(f"[{self.get_current_time_str()}] 距离上次爆量警报已超过4小时，发送心跳消息")
-                heartbeat_success = self.send_heartbeat_notification(len(instruments))
-                if heartbeat_success:
-                    # 更新心跳时间（避免频繁发送心跳）
-                    self.update_last_alert_time()
         
-        print(f"[{self.get_current_time_str()}] 监控完成")
+        # 添加说明（根据开关状态调整说明内容）
+        content += "---\n\n"
+        content += "**说明**:\n"
+        content += "- **爆量信号**: 1H需10倍增长，4H需5倍增长\n"
+        # 添加阈值说明
+        if self.enable_volume_alerts:
+            content += f"- **爆量阈值**: 当天成交额需超过{self.format_volume(self.volume_alert_daily_threshold)}\n"
+        else:
+            content += "- **爆量信息**: 已关闭\n"
+        
+        content += "- **过亿信号**: 当天成交额超过1亿USDT\n"
+        content += "- **过亿信号**: 当天成交额超过1亿USDT\n"
+        content += "- **相比上期**: 与上一个同周期的交易额对比\n"
+        content += "- **相比MA10**: 与过去10个周期平均值对比\n"
+        content += "- **当前交易额**: 1H为最新1小时K线volCcyQuote，4H为最新4小时K线volCcyQuote\n"
+        content += "- **当天总额**: 24小时内所有1小时K线volCcyQuote字段之和\n"
+        content += "- **K/M/B**: 千/百万/十亿 USDT\n"
+        
+        # 根据开关状态添加图表说明
+        if self.enable_bar_chart or self.enable_trend_chart:
+            content += "- **图表**: 由QuickChart.io生成"
+            if self.enable_bar_chart and self.enable_trend_chart:
+                content += "，包含排行图和趋势对比图\n"
+            elif self.enable_bar_chart:
+                content += "，仅显示排行图\n"
+            elif self.enable_trend_chart:
+                content += "，仅显示趋势对比图\n"
+            
+            if self.enable_trend_chart:
+                content += "- **趋势图**: 已排除BTC和ETH交易对，专注于其他币种\n"
+        else:
+            content += "- **图表**: 已关闭图表功能\n"
+        
+        content += f"- **图表配置**: 柱状图{'✅' if self.enable_bar_chart else '❌'} 趋势图{'✅' if self.enable_trend_chart else '❌'}"
+        
+        success = self.send_notification(title, content)
+        if success:
+            # 更新上次发送爆量警报的时间
+            self.update_last_alert_time()
+            # 如果发送了过亿信号，更新上次过亿交易对记录
+            if should_send_billion_alert:
+                self.update_last_billion_pairs(all_billion_alerts)
+    else:
+        print(f"[{self.get_current_time_str()}] 未发现需要发送的信号")
+        
+        # 检查是否需要发送心跳消息
+        if self.should_send_heartbeat():
+            print(f"[{self.get_current_time_str()}] 距离上次爆量警报已超过4小时，发送心跳消息")
+            heartbeat_success = self.send_heartbeat_notification(len(instruments))
+            if heartbeat_success:
+                # 更新心跳时间（避免频繁发送心跳）
+                self.update_last_alert_time()
+    
+    print(f"[{self.get_current_time_str()}] 监控完成")
         
 if __name__ == "__main__":
     monitor = OKXVolumeMonitor()
