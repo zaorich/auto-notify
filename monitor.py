@@ -1042,7 +1042,7 @@ class OKXVolumeMonitor:
     def has_new_billion_pairs(self, current_billion_alerts):
         """检查当前过亿交易对是否有新增币种"""
         if not current_billion_alerts:
-            return False
+            return False, []
         
         current_pairs = set(alert['inst_id'] for alert in current_billion_alerts)
         last_pairs = set(self.get_last_billion_pairs())
@@ -1051,12 +1051,15 @@ class OKXVolumeMonitor:
         new_pairs = current_pairs - last_pairs
         
         if new_pairs:
+            # 转换为币种名称（去掉-SWAP后缀）
+            new_coin_names = [pair.replace('-SWAP', '').replace('-USDT', '') for pair in new_pairs]
             print(f"[{self.get_current_time_str()}] 发现新增过亿币种: {', '.join(new_pairs)}")
-            return True
+            return True, new_coin_names
         else:
             print(f"[{self.get_current_time_str()}] 过亿币种无新增")
-            return False
+            return False, []
     
+
     def run_monitor(self):
         """运行监控主程序（修改版本）"""
         print(f"[{self.get_current_time_str()}] 开始监控")
@@ -1107,10 +1110,12 @@ class OKXVolumeMonitor:
         
         # 修改过亿信号的发送逻辑
         should_send_billion_alert = False
+        new_billion_coins = []  # 新增：用于存储新增的过亿币种名称
+        
         if has_billion_alerts:
             if self.enable_billion_new_only:
                 # 开启新增判断：只有当有新增币种时才发送
-                should_send_billion_alert = self.has_new_billion_pairs(all_billion_alerts)
+                should_send_billion_alert, new_billion_coins = self.has_new_billion_pairs(all_billion_alerts)
                 if not should_send_billion_alert:
                     print(f"[{self.get_current_time_str()}] 过亿币种无新增，跳过发送过亿信号")
             else:
@@ -1144,6 +1149,9 @@ class OKXVolumeMonitor:
                     title = f"{base_title} ({'/'.join(high_volume_coins)})"
                 else:
                     title = base_title
+                # 如果有新增过亿币种，添加到标题中
+                if new_billion_coins:
+                    title += f" 新增:{'/'.join(new_billion_coins)}"
             elif has_volume_alerts:
                 base_title = f"🚨 OKX监控 - 发现{len(all_alerts)}个爆量信号"
                 if high_volume_coins:
@@ -1151,7 +1159,12 @@ class OKXVolumeMonitor:
                 else:
                     title = base_title
             else:
-                title = f"💰 OKX监控 - 发现{len(all_billion_alerts)}个过亿信号"
+                base_title = f"💰 OKX监控 - 发现{len(all_billion_alerts)}个过亿信号"
+                # 如果有新增过亿币种，添加到标题中
+                if new_billion_coins:
+                    title = f"{base_title} 新增:{'/'.join(new_billion_coins)}"
+                else:
+                    title = base_title
                 
             content = f"**监控时间**: {self.get_current_time_str()}\n"
             content += f"**监控范围**: {len(instruments)} 个交易对\n\n"
