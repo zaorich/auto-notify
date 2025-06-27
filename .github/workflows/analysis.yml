@@ -1,0 +1,63 @@
+# 工作流的名称
+name: Crypto Turnover Spike Analysis
+
+# 工作流的触发条件
+on:
+  # 允许你手动在Actions页面点击按钮来运行此工作流
+  workflow_dispatch:
+  
+  # 定时触发：使用cron语法
+  # 下面的 "0 2 * * *" 表示在每天的UTC时间凌晨2点运行
+  # 你可以根据需要修改，例如 "0 8 * * *" 表示每天UTC时间早上8点（北京时间下午4点）
+  schedule:
+    - cron: '0 2 * * *'
+  
+  # 当有代码推送到main分支时也触发（方便测试）
+  push:
+    branches:
+      - main
+
+# 定义工作任务
+jobs:
+  run-analysis:
+    # 指定运行环境，使用最新的Ubuntu系统
+    runs-on: ubuntu-latest
+
+    # 定义任务的步骤
+    steps:
+      # 第一步：检出代码
+      # 这个步骤会把你的仓库代码下载到虚拟机中
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 第二步：设置Python环境
+      # 指定使用Python 3.10版本
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      # 第三步：安装依赖
+      # 读取 requirements.txt 文件并安装所有库
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # 第四步：运行分析脚本
+      # 执行你的Python脚本，这会生成 okx_turnover_spikes_analysis.csv 文件
+      - name: Run Python script for analysis
+        run: python analyze_spikes.py
+
+      # 第五步：提交结果到仓库
+      # 这是一个关键步骤，它会自动将新生成的CSV文件提交回你的GitHub仓库
+      - name: Commit and push results
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          # 提交信息，可以自定义
+          commit_message: "📈 Analysis update for $(date +'%Y-%m-%d')"
+          # 要提交的文件，这里是我们的CSV报告
+          file_pattern: okx_turnover_spikes_analysis.csv
+          # 提交的用户和邮箱
+          commit_user_name: "GitHub Actions Bot"
+          commit_user_email: "actions@github.com"
