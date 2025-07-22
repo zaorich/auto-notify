@@ -42,7 +42,7 @@ class OKXVolumeMonitor:
 
         # 新增：爆量信息开关配置
         self.enable_volume_alerts = True  # 爆量信息总开关
-        self.volume_alert_daily_threshold = 50_000_000  # 当天成交额阈值：5000万USDT，可配置
+        self.volume_alert_daily_threshold = 30_000_000  # 当天成交额阈值：5000万USDT，可配置
         # 也可以从环境变量读取：
         # self.enable_volume_alerts = os.environ.get('ENABLE_VOLUME_ALERTS', 'true').lower() == 'true'
         # self.volume_alert_daily_threshold = float(os.environ.get('VOLUME_ALERT_DAILY_THRESHOLD', '50000000'))
