@@ -34,51 +34,31 @@ class OKXMonitor:
         return session
 
     def get_current_time_str(self):
-        return datetime.now(self.timezone).strftime('%Y-%m-%d %H:%M:%S')
+        return datetime.now(self.timezone).strftime('%Y-m-d H:%M:%S')
 
     def send_notification(self, title, content):
-        """
-        [增强版] 通过Server酱发送微信通知，并带有详细的调试日志。
-        """
-        # --- 新增的调试打印 ---
-        print(f"[{self.get_current_time_str()}] 准备发送通知...")
         if not self.server_jiang_key:
-            print(f"[{self.get_current_time_str()}] 错误：SERVER_JIANG_KEY 环境变量未设置或为空。请在GitHub Secrets中配置。")
+            print(f"[{self.get_current_time_str()}] 未在GitHub Secrets中配置SERVER_JIANG_KEY，通知将打印到控制台。")
             print(f"标题: {title}\n内容:\n{content}")
             return False
-        else:
-            # 打印部分KEY以供验证，但隐藏完整KEY保证安全
-            masked_key = self.server_jiang_key[:5] + '...' + self.server_jiang_key[-4:]
-            print(f"[{self.get_current_time_str()}] 使用的KEY: {masked_key}")
-        # --- 调试打印结束 ---
-            
         try:
             url = f"https://sctapi.ftqq.com/{self.server_jiang_key}.send"
             data = {'title': title, 'desp': content}
             response = requests.post(url, data=data, timeout=30)
-            
-            # --- 新增的调试打印 ---
-            print(f"[{self.get_current_time_str()}] Server酱API响应状态码: {response.status_code}")
-            print(f"[{self.get_current_time_str()}] Server酱API响应内容: {response.text}")
-            # --- 调试打印结束 ---
-
-            response.raise_for_status() # 如果状态码不是2xx，将抛出异常
+            response.raise_for_status()
             result = response.json()
             if result.get('code') == 0:
                 print(f"[{self.get_current_time_str()}] 通知发送成功: {title}")
                 return True
             else:
-                print(f"[{self.get_current_time_str()}] 通知发送失败，Server酱返回错误: {result}")
+                print(f"[{self.get_current_time_str()}] 通知发送失败: {result}")
                 return False
-        except requests.exceptions.RequestException as e:
-            print(f"[{self.get_current_time_str()}] 发送通知时发生网络请求异常: {e}")
-            return False
         except Exception as e:
-            print(f"[{self.get_current_time_str()}] 发送通知时发生未知异常: {e}")
+            print(f"[{self.get_current_time_str()}] 发送通知时出错: {e}")
             return False
-
 
     def get_perpetual_instruments(self):
+        # (代码无变化)
         try:
             url = f"{self.base_url}/api/v5/public/instruments"
             params = {'instType': 'SWAP'}
@@ -89,14 +69,13 @@ class OKXMonitor:
                 instruments = [inst['instId'] for inst in data['data'] if inst['state'] == 'live' and 'USDT' in inst['instId']]
                 print(f"[{self.get_current_time_str()}] 获取到 {len(instruments)} 个活跃的USDT永续合约")
                 return instruments
-            else:
-                print(f"[{self.get_current_time_str()}] 获取交易对失败: {data}")
-                return []
+            return []
         except Exception as e:
             print(f"[{self.get_current_time_str()}] 获取交易对时出错: {e}")
             return []
 
     def get_kline_data(self, inst_id, bar='1H', limit=100):
+        # (代码无变化)
         try:
             url = f"{self.base_url}/api/v5/market/candles"
             params = {'instId': inst_id, 'bar': bar, 'limit': limit}
@@ -113,6 +92,7 @@ class OKXMonitor:
             return []
 
     def calculate_macd(self, prices, fast=12, slow=26, signal=9):
+        # (代码无变化)
         if len(prices) < slow: return []
         prices_series = pd.Series(prices)
         ema_fast = prices_series.ewm(span=fast, adjust=False).mean()
@@ -122,7 +102,8 @@ class OKXMonitor:
         histogram = macd_line - signal_line
         return [{'macd': m, 'signal': s, 'histogram': h} for m, s, h in zip(macd_line, signal_line, histogram)]
 
-    def check_pullback_opportunity(self, d1_macd, h1_macd):
+    # --- 策略函数 ---
+    def check_long_pullback_opportunity(self, d1_macd, h1_macd):
         if len(d1_macd) < 2 or len(h1_macd) < 2: return False
         d1_last, d1_prev = d1_macd[-1], d1_macd[-2]
         h1_last, h1_prev = h1_macd[-1], h1_macd[-2]
@@ -130,15 +111,36 @@ class OKXMonitor:
         hourly_ok = (h1_last['macd'] > 0 and h1_last['signal'] > 0 and h1_last['macd'] > h1_last['signal'] and h1_prev['macd'] < h1_prev['signal'])
         return daily_ok and hourly_ok
 
-    def check_trend_opportunity(self, d1_macd, h4_macd):
+    def check_long_trend_opportunity(self, d1_macd, h4_macd):
         if len(d1_macd) < 2 or len(h4_macd) < 2: return 'None'
         d1_last, d1_prev = d1_macd[-1], d1_macd[-2]
         daily_ok = ((d1_last['macd'] > 0 or d1_last['signal'] > 0) and (d1_prev['macd'] < 0 or d1_prev['signal'] < 0) and d1_last['macd'] > d1_last['signal'])
         if not daily_ok: return 'None'
         h4_last = h4_macd[-1]
         four_hour_ok = (h4_last['macd'] > 0 and h4_last['signal'] > 0 and h4_last['macd'] > h4_last['signal'])
-        return 'Trend' if four_hour_ok else 'Watchlist'
+        return 'Long Trend' if four_hour_ok else 'Long Watchlist'
 
+    def check_short_pullback_opportunity(self, d1_macd, h1_macd):
+        if len(d1_macd) < 2 or len(h1_macd) < 2: return False
+        d1_last, d1_prev = d1_macd[-1], d1_macd[-2]
+        h1_last, h1_prev = h1_macd[-1], h1_macd[-2]
+        # 空头回调: 日线0轴下，金叉反弹，柱子收缩
+        daily_ok = (d1_last['macd'] < 0 and d1_last['signal'] < 0 and d1_last['macd'] > d1_last['signal'] and d1_last['histogram'] > 0 and d1_prev['histogram'] > d1_last['histogram'])
+        # 1小时: 0轴下，刚刚死叉，确认反弹结束
+        hourly_ok = (h1_last['macd'] < 0 and h1_last['signal'] < 0 and h1_last['macd'] < h1_last['signal'] and h1_prev['macd'] > h1_prev['signal'])
+        return daily_ok and hourly_ok
+
+    def check_short_trend_opportunity(self, d1_macd, h4_macd):
+        if len(d1_macd) < 2 or len(h4_macd) < 2: return 'None'
+        d1_last, d1_prev = d1_macd[-1], d1_macd[-2]
+        # 空头趋势: 日线刚下穿0轴，且死叉
+        daily_ok = ((d1_last['macd'] < 0 or d1_last['signal'] < 0) and (d1_prev['macd'] > 0 or d1_prev['signal'] > 0) and d1_last['macd'] < d1_last['signal'])
+        if not daily_ok: return 'None'
+        # 4小时: 已在0轴下，且死叉
+        h4_last = h4_macd[-1]
+        four_hour_ok = (h4_last['macd'] < 0 and h4_last['signal'] < 0 and h4_last['macd'] < h4_last['signal'])
+        return 'Short Trend' if four_hour_ok else 'Short Watchlist'
+    
     def analyze_instrument_for_opportunities(self, inst_id):
         try:
             h1_klines = self.get_kline_data(inst_id, '1H', 24)
@@ -148,43 +150,78 @@ class OKXMonitor:
             d1_klines = self.get_kline_data(inst_id, '1D', 100)
             h4_klines = self.get_kline_data(inst_id, '4H', 100)
             if not d1_klines or not h4_klines: return None
+            
             d1_closes = [float(k[4]) for k in d1_klines]
             h4_closes = [float(k[4]) for k in h4_klines]
             h1_closes = [float(k[4]) for k in h1_klines]
             d1_macd = self.calculate_macd(d1_closes)
             h4_macd = self.calculate_macd(h4_closes)
             h1_macd = self.calculate_macd(h1_closes)
-            if self.check_pullback_opportunity(d1_macd, h1_macd):
-                return {'inst_id': inst_id, 'type': 'Pullback', 'volume': daily_volume}
-            trend_status = self.check_trend_opportunity(d1_macd, h4_macd)
-            if trend_status in ['Trend', 'Watchlist']:
-                return {'inst_id': inst_id, 'type': trend_status, 'volume': daily_volume}
+            
+            # --- 升级版策略检查流程 ---
+            # 优先检查趋势机会
+            long_trend_status = self.check_long_trend_opportunity(d1_macd, h4_macd)
+            if long_trend_status != 'None':
+                return {'inst_id': inst_id, 'type': long_trend_status, 'volume': daily_volume}
+            
+            short_trend_status = self.check_short_trend_opportunity(d1_macd, h4_macd)
+            if short_trend_status != 'None':
+                return {'inst_id': inst_id, 'type': short_trend_status, 'volume': daily_volume}
+
+            # 如果没有趋势机会，再检查回调机会
+            if self.check_long_pullback_opportunity(d1_macd, h1_macd):
+                return {'inst_id': inst_id, 'type': 'Long Pullback', 'volume': daily_volume}
+                
+            if self.check_short_pullback_opportunity(d1_macd, h1_macd):
+                return {'inst_id': inst_id, 'type': 'Short Pullback', 'volume': daily_volume}
+                
             return None
         except Exception:
             return None
 
     def create_opportunity_report(self, opportunities):
-        rank = {'Trend': 1, 'Pullback': 1, 'Watchlist': 2}
-        opportunities.sort(key=lambda x: (rank[x['type']], -x['volume']))
-        type_map = {'Pullback': '🟢 回调机会', 'Trend': '🔵 趋势机会', 'Watchlist': '🟡 趋势观察'}
-        content = f"### 发现 {len(opportunities)} 个MACD交易机会\n\n"
+        # 升级版排序和报告
+        rank = {
+            'Long Trend': 1, 'Short Trend': 1, 
+            'Long Pullback': 1, 'Short Pullback': 1,
+            'Long Watchlist': 2, 'Short Watchlist': 2
+        }
+        opportunities.sort(key=lambda x: (rank.get(x['type'], 3), -x['volume']))
+        
+        type_map = {
+            'Long Pullback': '🐂 多头回调', 
+            'Long Trend': '🚀 多头趋势', 
+            'Long Watchlist': '👀 多头观察',
+            'Short Pullback': '🐻 空头回调', 
+            'Short Trend': '📉 空头趋势', 
+            'Short Watchlist': '👀 空头观察'
+        }
+        content = f"### 发现 {len(opportunities)} 个多空交易机会\n\n"
         content += "| 交易对 | 机会类型 | 24H成交额 |\n|:---|:---|:---|\n"
         for opp in opportunities:
             inst_name = opp['inst_id'].replace('-USDT-SWAP', '')
             opp_type = type_map.get(opp['type'], '未知')
             volume_str = self.format_volume(opp['volume'])
             content += f"| **{inst_name}** | {opp_type} | {volume_str} |\n"
-        content += "\n---\n**策略说明:**\n- **回调机会**: 日线0上死叉回调 + 1小时0上刚金叉。\n- **趋势机会**: 日线刚上穿0轴金叉 + 4小时已在0上金叉。\n- **趋势观察**: 日线刚上穿0轴金叉，等待4小时金叉信号。\n"
-        content += f"- **筛选条件**: 24小时成交额 > {self.format_volume(self.MACD_VOLUME_THRESHOLD)} USDT。"
+        
+        content += "\n---\n**策略说明:**\n"
+        content += "- **多头趋势**: 日线刚上穿0轴金叉 + 4H已在0上金叉。\n"
+        content += "- **多头回调**: 日线0上死叉回调 + 1H在0上刚金叉。\n"
+        content += "- **空头趋势**: 日线刚下穿0轴死叉 + 4H已在0下死叉。\n"
+        content += "- **空头回调**: 日线0下金叉反弹 + 1H在0下刚死叉。\n"
+        content += f"- **观察信号**: 指日线已满足趋势条件，等待4H信号确认。\n"
+        content += f"- **筛选条件**: 24H成交额 > {self.format_volume(self.MACD_VOLUME_THRESHOLD)} USDT。"
         return content
 
     def format_volume(self, volume):
+        # (代码无变化)
         if volume >= 1_000_000_000: return f"{volume/1_000_000_000:.2f}B"
         if volume >= 1_000_000: return f"{volume/1_000_000:.2f}M"
         if volume >= 1_000: return f"{volume/1_000:.2f}K"
         return f"{volume:.2f}"
 
     def run(self):
+        # (代码无变化)
         current_time = self.get_current_time_str()
         print(f"[{current_time}] 开始执行监控任务...")
         if not self.ENABLE_MACD_SCANNER:
@@ -210,11 +247,11 @@ class OKXMonitor:
                     print(f"[{self.get_current_time_str()}] 批次处理完成，暂停2秒...")
                     time.sleep(2)
         if all_opportunities:
-            title = f"🚨 发现 {len(all_opportunities)} 个 MACD 交易机会!"
+            title = f"🚨 发现 {len(all_opportunities)} 个多空交易机会!"
             content = self.create_opportunity_report(all_opportunities)
             self.send_notification(title, content)
         else:
-            print(f"[{current_time}] 本次未发现符合条件的MACD交易机会。")
+            print(f"[{current_time}] 本次未发现符合条件的交易机会。")
         print(f"[{current_time}] 监控任务执行完毕。")
 
 if __name__ == "__main__":
