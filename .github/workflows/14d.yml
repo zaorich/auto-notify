@@ -1,42 +1,37 @@
 name: OKX MACD Opportunity Scanner
 
 on:
-  # 1. 定时触发：使用CRON表达式，下面代表每小时的0分执行一次
-  # '0 * * * *' -> 每小时执行
-  # '0 */2 * * *' -> 每2小时执行
-  # '0 8,12,22 * * *' -> 每天的8点, 12点, 22点执行 (UTC时间)
+  # 1. 定时触发：使用CRON表达式
+  # '45 * * * *' -> 在每个小时的第45分钟运行一次。
+  # 这样可以在小时K线收盘前及时发现机会。
   schedule:
-    - cron: '0 * * * *'
+    - cron: '45 * * * *'
 
   # 2. 手动触发：允许你在GitHub Actions页面点击按钮手动运行
   workflow_dispatch:
 
 jobs:
   scan-opportunities:
-    runs-on: ubuntu-latest  # 使用最新的Ubuntu虚拟机环境
+    runs-on: ubuntu-latest
 
     steps:
       # 第一步：检出代码
-      # 把你的仓库代码下载到虚拟机中
       - name: Checkout repository
         uses: actions/checkout@v3
 
       # 第二步：设置Python环境
-      # 安装指定版本的Python
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
 
       # 第三步：安装依赖
-      # 读取 requirements.txt 文件并安装所有需要的库
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
       # 第四步：运行监控脚本
-      # 执行我们的Python脚本，并把密钥作为环境变量传入
       - name: Run OKX Monitor Script
         env:
           SERVER_JIANG_KEY: ${{ secrets.SERVER_JIANG_KEY }}
