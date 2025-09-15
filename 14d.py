@@ -14,7 +14,7 @@ class OKXMonitor:
     def __init__(self):
         # --- 核心配置 ---
         self.base_url = "https://www.okx.com"
-        self.server_jiang_key = os.environ.get('SERVER_JIANG_KEY', 'SCT281228TBF1BQU3KUJ4vLRkykhzIE80e')
+        self.server_jiang_key = 'SCT281228TBF1BQU3KUJ4vLRkykhzIE80e'
         
         # --- 功能开关 ---
         self.ENABLE_MACD_SCANNER = True
