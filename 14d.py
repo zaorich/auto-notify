@@ -14,7 +14,7 @@ class OKXMonitor:
     def __init__(self):
         # --- 核心配置 ---
         self.base_url = "https://www.okx.com"
-        self.server_jiang_key = 'SCT281228TBF1BQU3KUJ4vLRkykhzIE80e'
+        self.server_jiang_key = os.environ.get('SERVER_JIANG_KEY') 
         
         # --- 功能开关 ---
         self.ENABLE_MACD_SCANNER = True
@@ -99,6 +99,7 @@ class OKXMonitor:
         histogram = macd_line - signal_line
         return [{'macd': m, 'signal': s, 'histogram': h} for m, s, h in zip(macd_line, signal_line, histogram)]
 
+    # --- 策略函数 ---
     def check_long_pullback_opportunity(self, d1_macd, h1_macd):
         if len(d1_macd) < 2 or len(h1_macd) < 2: return False
         d1_last, d1_prev = d1_macd[-1], d1_macd[-2]
@@ -115,6 +116,21 @@ class OKXMonitor:
         h4_last = h4_macd[-1]
         four_hour_ok = (h4_last['macd'] > 0 and h4_last['signal'] > 0 and h4_last['macd'] > h4_last['signal'])
         return 'Long Trend' if four_hour_ok else 'Long Watchlist'
+        
+    def check_long_continuation_opportunity(self, d1_macd, h1_macd):
+        if len(d1_macd) < 3 or len(h1_macd) < 2: return False
+        d1_last, d1_prev = d1_macd[-1], d1_macd[-2]
+        h1_last, h1_prev = h1_macd[-1], h1_macd[-2]
+        # 日线: 0上，刚完成死叉后的再次金叉
+        daily_ok = (d1_last['macd'] > 0 and d1_last['signal'] > 0 and 
+                    d1_last['macd'] > d1_last['signal'] and # 当前是金叉
+                    d1_prev['macd'] < d1_prev['signal'] and # 上一根是死叉
+                    d1_last['histogram'] > d1_prev['histogram']) # 动能增强
+        # 1小时: 0上刚金叉，提供精确入场点
+        hourly_ok = (h1_last['macd'] > 0 and h1_last['signal'] > 0 and 
+                     h1_last['macd'] > h1_last['signal'] and 
+                     h1_prev['macd'] < h1_prev['signal'])
+        return daily_ok and hourly_ok
 
     def check_short_pullback_opportunity(self, d1_macd, h1_macd):
         if len(d1_macd) < 2 or len(h1_macd) < 2: return False
@@ -132,6 +148,21 @@ class OKXMonitor:
         h4_last = h4_macd[-1]
         four_hour_ok = (h4_last['macd'] < 0 and h4_last['signal'] < 0 and h4_last['macd'] < h4_last['signal'])
         return 'Short Trend' if four_hour_ok else 'Short Watchlist'
+        
+    def check_short_continuation_opportunity(self, d1_macd, h1_macd):
+        if len(d1_macd) < 3 or len(h1_macd) < 2: return False
+        d1_last, d1_prev = d1_macd[-1], d1_macd[-2]
+        h1_last, h1_prev = h1_macd[-1], h1_macd[-2]
+        # 日线: 0下，刚完成金叉后的再次死叉
+        daily_ok = (d1_last['macd'] < 0 and d1_last['signal'] < 0 and 
+                    d1_last['macd'] < d1_last['signal'] and # 当前是死叉
+                    d1_prev['macd'] > d1_prev['signal'] and # 上一根是金叉
+                    d1_last['histogram'] < d1_prev['histogram']) # 动能增强
+        # 1小时: 0下刚死叉，提供精确入场点
+        hourly_ok = (h1_last['macd'] < 0 and h1_last['signal'] < 0 and 
+                     h1_last['macd'] < h1_last['signal'] and 
+                     h1_prev['macd'] > h1_prev['signal'])
+        return daily_ok and hourly_ok
     
     def analyze_instrument_for_opportunities(self, inst_id):
         try:
@@ -150,6 +181,8 @@ class OKXMonitor:
             h4_macd = self.calculate_macd(h4_closes)
             h1_macd = self.calculate_macd(h1_closes)
             
+            # --- 升级版策略检查流程 ---
+            # 优先检查趋势和延续机会
             long_trend_status = self.check_long_trend_opportunity(d1_macd, h4_macd)
             if long_trend_status != 'None':
                 return {'inst_id': inst_id, 'type': long_trend_status, 'volume': daily_volume}
@@ -158,6 +191,13 @@ class OKXMonitor:
             if short_trend_status != 'None':
                 return {'inst_id': inst_id, 'type': short_trend_status, 'volume': daily_volume}
 
+            if self.check_long_continuation_opportunity(d1_macd, h1_macd):
+                return {'inst_id': inst_id, 'type': 'Long Continuation', 'volume': daily_volume}
+
+            if self.check_short_continuation_opportunity(d1_macd, h1_macd):
+                return {'inst_id': inst_id, 'type': 'Short Continuation', 'volume': daily_volume}
+
+            # 最后检查回调机会
             if self.check_long_pullback_opportunity(d1_macd, h1_macd):
                 return {'inst_id': inst_id, 'type': 'Long Pullback', 'volume': daily_volume}
                 
@@ -171,17 +211,20 @@ class OKXMonitor:
     def create_opportunity_report(self, opportunities):
         rank = {
             'Long Trend': 1, 'Short Trend': 1, 
+            'Long Continuation': 1, 'Short Continuation': 1,
             'Long Pullback': 1, 'Short Pullback': 1,
             'Long Watchlist': 2, 'Short Watchlist': 2
         }
         opportunities.sort(key=lambda x: (rank.get(x['type'], 3), -x['volume']))
         
         type_map = {
-            'Long Pullback': '🐂 多头回调', 
             'Long Trend': '🚀 多头趋势', 
+            'Long Continuation': '➡️ 多头延续',
+            'Long Pullback': '🐂 多头回调', 
             'Long Watchlist': '👀 多头观察',
-            'Short Pullback': '🐻 空头回调', 
             'Short Trend': '📉 空头趋势', 
+            'Short Continuation': '↘️ 空头延续',
+            'Short Pullback': '🐻 空头回调', 
             'Short Watchlist': '👀 空头观察'
         }
         content = f"### 发现 {len(opportunities)} 个多空信号\n\n"
@@ -194,8 +237,10 @@ class OKXMonitor:
         
         content += "\n---\n**策略说明:**\n"
         content += "- **多头趋势**: 日线刚上穿0轴金叉 + 4H已在0上金叉。\n"
+        content += "- **多头延续**: 日线0上死叉后再金叉 + 1H在0上刚金叉。\n"
         content += "- **多头回调**: 日线0上死叉回调 + 1H在0上刚金叉。\n"
         content += "- **空头趋势**: 日线刚下穿0轴死叉 + 4H已在0下死叉。\n"
+        content += "- **空头延续**: 日线0下金叉后再死叉 + 1H在0下刚死叉。\n"
         content += "- **空头回调**: 日线0下金叉反弹 + 1H在0下刚死叉。\n"
         content += f"- **观察信号**: 指日线已满足趋势条件，等待4H信号确认。\n"
         content += f"- **筛选条件**: 24H成交额 > {self.format_volume(self.MACD_VOLUME_THRESHOLD)} USDT。"
@@ -234,27 +279,19 @@ class OKXMonitor:
                     print(f"[{self.get_current_time_str()}] 批次处理完成，暂停2秒...")
                     time.sleep(2)
 
-        # --- 核心修改：智能通知逻辑 ---
         if all_opportunities:
-            # 1. 筛选出可操作的机会 (即非'Watchlist'的机会)
             actionable_opportunities = [
                 opp for opp in all_opportunities if 'Watchlist' not in opp['type']
             ]
-
-            # 2. 只有当存在可操作机会时，才发送通知
             if actionable_opportunities:
-                # 报告的标题可以更精确，只报告核心机会的数量
                 title = f"🚨 发现 {len(actionable_opportunities)} 个核心交易机会!"
-                # 报告的内容依然包含所有发现的信号（包括观察列表），以提供完整上下文
                 content = self.create_opportunity_report(all_opportunities)
                 self.send_notification(title, content)
                 print(f"[{current_time}] 发现 {len(actionable_opportunities)} 个核心机会，已发送通知。")
             else:
-                # 如果只发现了'Watchlist'信号，则只在日志中记录，不发送通知
                 print(f"[{current_time}] 仅发现 {len(all_opportunities)} 个观察信号，本次不发送通知。")
         else:
             print(f"[{current_time}] 本次未发现任何符合条件的信号。")
-        # --- 修改结束 ---
         
         print(f"[{current_time}] 监控任务执行完毕。")
 
