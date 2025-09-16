@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/-bin/env python3
 # -*- coding: utf-8 -*-  
 
 import requests
@@ -110,39 +110,62 @@ class OKXMonitor:
         return [{'macd': m, 'signal': s, 'histogram': h} for m, s, h in zip(macd_line, signal_line, histogram)]
 
     def get_market_sentiment(self):
+        """[升级版] 分析BTC得出市场情绪和详细的分析依据"""
         print(f"[{self.get_current_time_str()}] 正在分析市场情绪 (BTC)...")
         btc_id = 'BTC-USDT-SWAP'
-        d1_klines = self.get_kline_data(btc_id, '1D', 100)
-        h4_klines = self.get_kline_data(btc_id, '4H', 100)
-        h1_klines = self.get_kline_data(btc_id, '1H', 100)
-        if not d1_klines or not h4_klines or not h1_klines:
-            return 'Neutral', "无法获取BTC数据，情绪未知"
-        d1_macd = self.calculate_macd([float(k[4]) for k in d1_klines])
-        h4_macd = self.calculate_macd([float(k[4]) for k in h4_klines])
-        if len(d1_macd) < 2 or len(h4_macd) < 2:
-            return 'Neutral', "BTC数据不足，情绪未知"
+        klines = {}
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            future_d1 = executor.submit(self.get_kline_data, btc_id, '1D', 100)
+            future_h4 = executor.submit(self.get_kline_data, btc_id, '4H', 100)
+            future_h1 = executor.submit(self.get_kline_data, btc_id, '1H', 100)
+            klines['1D'] = future_d1.result()
+            klines['4H'] = future_h4.result()
+            klines['1H'] = future_h1.result()
+
+        if not all(klines.values()):
+            return 'Neutral', "无法获取BTC数据", "分析失败，请检查网络或API。"
+
+        macds = {tf: self.calculate_macd([float(k[4]) for k in data]) for tf, data in klines.items()}
+        if any(len(macd_data) < 2 for macd_data in macds.values()):
+            return 'Neutral', "BTC数据不足", "分析失败，K线数据不足。"
+
         score = 0
-        if d1_macd[-1]['macd'] > 0 and d1_macd[-1]['signal'] > 0: score += 2
-        if d1_macd[-1]['macd'] < 0 and d1_macd[-1]['signal'] < 0: score -= 2
-        if d1_macd[-1]['macd'] > d1_macd[-1]['signal']: score += 1
-        if d1_macd[-1]['macd'] < d1_macd[-1]['signal']: score -= 1
-        if h4_macd[-1]['macd'] > 0 and h4_macd[-1]['signal'] > 0: score += 1
-        if h4_macd[-1]['macd'] < 0 and h4_macd[-1]['signal'] < 0: score -= 1
-        if h4_macd[-1]['macd'] > h4_macd[-1]['signal']: score += 0.5
-        if h4_macd[-1]['macd'] < h4_macd[-1]['signal']: score -= 0.5
-        if score >= 3: return 'Bullish', "强势看涨 🐂"
-        if score >= 1: return 'Bullish', "震荡偏多 📈"
-        if score <= -3: return 'Bearish', "强势看空 🐻"
-        if score <= -1: return 'Bearish', "震荡偏空 📉"
-        return 'Neutral', "多空胶着 횡보"
+        analysis_details = []
+        
+        # 逐个周期分析
+        for tf, weight in [('1D', 2), ('4H', 1), ('1H', 0.5)]:
+            last, prev = macds[tf][-1], macds[tf][-2]
+            
+            # 1. 0轴位置
+            pos_text = "0轴上方" if last['macd'] > 0 else "0轴下方"
+            score += weight if last['macd'] > 0 else -weight
+            
+            # 2. 金叉/死叉
+            cross_text = "金叉" if last['macd'] > last['signal'] else "死叉"
+            score += weight * 0.5 if last['macd'] > last['signal'] else -weight * 0.5
+            
+            # 3. 动能柱
+            hist_text = "动能增强" if last['histogram'] > prev['histogram'] else "动能减弱"
+            
+            analysis_details.append(f"**{tf}**: {pos_text} ({'多' if pos_text=='0轴上方' else '空'}), {cross_text} ({'涨' if cross_text=='金叉' else '跌'}), {hist_text}")
+
+        # 结论
+        if score >= 4: sentiment, text = 'Bullish', "强势看涨 🐂"
+        elif score >= 1.5: sentiment, text = 'Bullish', "震荡偏多 📈"
+        elif score <= -4: sentiment, text = 'Bearish', "强势看空 🐻"
+        elif score <= -1.5: sentiment, text = 'Bearish', "震荡偏空 📉"
+        else: sentiment, text = 'Neutral', "多空胶着 횡보"
+        
+        details_text = "\n".join([f"- {d}" for d in analysis_details])
+        return sentiment, text, details_text
 
     def analyze_instrument_for_opportunities(self, inst_id):
+        # (此函数内部逻辑无变化)
         try:
             h1_klines = self.get_kline_data(inst_id, '1H', 24)
             if len(h1_klines) < 24: return None
             daily_volume = sum(float(kline[7]) for kline in h1_klines)
             if daily_volume < self.MACD_VOLUME_THRESHOLD: return None
-            
             d1_klines, h4_klines, ticker_data = None, None, None
             with ThreadPoolExecutor(max_workers=3) as executor:
                 future_d1 = executor.submit(self.get_kline_data, inst_id, '1D', 100)
@@ -151,22 +174,14 @@ class OKXMonitor:
                 d1_klines = future_d1.result()
                 h4_klines = future_h4.result()
                 ticker_data = future_ticker.result()
-
             if not d1_klines or not h4_klines: return None
-            
-            result_base = {
-                'inst_id': inst_id, 
-                'volume': daily_volume,
-                'price_change_24h': ticker_data.get('price_change_24h', 0)
-            }
+            result_base = {'inst_id': inst_id, 'volume': daily_volume, 'price_change_24h': ticker_data.get('price_change_24h', 0)}
             d1_closes = [float(k[4]) for k in d1_klines]
             h4_closes = [float(k[4]) for k in h4_klines]
             h1_closes = [float(k[4]) for k in h1_klines]
             d1_macd = self.calculate_macd(d1_closes)
             h4_macd = self.calculate_macd(h4_closes)
             h1_macd = self.calculate_macd(h1_closes)
-
-            # --- Start: Strategy Check Functions ---
             def check_long_pullback_opportunity(d1_macd, h1_macd):
                 if len(d1_macd) < 2 or len(h1_macd) < 2: return False
                 d1_last, d1_prev = d1_macd[-1], d1_macd[-2]
@@ -211,9 +226,6 @@ class OKXMonitor:
                 daily_ok = (d1_last['macd'] < 0 and d1_last['signal'] < 0 and d1_last['macd'] < d1_last['signal'] and d1_prev['macd'] > d1_prev['signal'] and d1_last['histogram'] < d1_prev['histogram'])
                 hourly_ok = (h1_last['macd'] < 0 and h1_last['signal'] < 0 and h1_last['macd'] < h1_last['signal'] and h1_prev['macd'] > h1_prev['signal'])
                 return daily_ok and hourly_ok
-            # --- End: Strategy Check Functions ---
-
-            # --- Analysis Flow ---
             long_trend_status = check_long_trend_opportunity(d1_macd, h4_macd)
             if long_trend_status != 'None': return {**result_base, 'type': long_trend_status}
             short_trend_status = check_short_trend_opportunity(d1_macd, h4_macd)
@@ -226,13 +238,15 @@ class OKXMonitor:
         except Exception:
             return None
 
-    def create_opportunity_report(self, opportunities, market_sentiment, sentiment_text, upgraded_signals):
+    def create_opportunity_report(self, opportunities, market_sentiment, sentiment_text, sentiment_details, upgraded_signals):
+        # (此函数已更新以包含 sentiment_details)
         rank = {'Long Trend': 1, 'Short Trend': 1, 'Long Continuation': 1, 'Short Continuation': 1, 'Long Pullback': 1, 'Short Pullback': 1, 'Long Watchlist': 2, 'Short Watchlist': 2}
         opportunities.sort(key=lambda x: (rank.get(x['type'], 3), -x['volume']))
         type_map = {'Long Trend': '🚀 多头趋势', 'Long Continuation': '➡️ 多头延续', 'Long Pullback': '🐂 多头回调', 'Long Watchlist': '👀 多头观察', 'Short Trend': '📉 空头趋势', 'Short Continuation': '↘️ 空头延续', 'Short Pullback': '🐻 空头回调', 'Short Watchlist': '👀 空头观察'}
-        content = f"### 市场情绪: {sentiment_text}\n\n"
+        
+        content = f"### 市场情绪: {sentiment_text}\n"
+        content += f"<details><summary>点击查看情绪分析依据</summary>\n\n{sentiment_details}\n\n</details>\n\n"
 
-        # --- Simplified Report Tables ---
         def generate_table_rows(opp_list):
             rows = ""
             for opp in opp_list:
@@ -240,10 +254,7 @@ class OKXMonitor:
                 opp_type = type_map.get(opp['type'], '未知')
                 volume_str = self.format_volume(opp['volume'])
                 change_pct_str = f"📈 +{opp['price_change_24h']:.2f}%" if opp['price_change_24h'] > 0 else f"📉 {opp['price_change_24h']:.2f}%"
-                warning = ""
-                if (market_sentiment == 'Bullish' and 'Short' in opp['type']) or \
-                   (market_sentiment == 'Bearish' and 'Long' in opp['type']):
-                    warning = " (逆大盘)"
+                warning = " (逆大盘)" if (market_sentiment == 'Bullish' and 'Short' in opp['type']) or (market_sentiment == 'Bearish' and 'Long' in opp['type']) else ""
                 rows += f"| **{inst_name}** | {opp_type}{warning} | {volume_str} | {change_pct_str} |\n"
             return rows
 
@@ -259,7 +270,7 @@ class OKXMonitor:
             content += "| 交易对 | 机会类型 | 24H成交额 | 24H涨跌幅 |\n|:---|:---|:---|:---|\n"
             content += generate_table_rows(new_opportunities)
         
-        content += "\n---\n**策略说明:**\n- **趋势**: 日线刚穿越0轴 + 4H确认。\n- **延续**: 日线0轴同向盘整后突破 + 1H确认。\n- **回调**: 日线同向趋势中回调 + 1H确认。\n- **观察**: 指日线已满足趋势条件，等待4H信号确认。\n"
+        content += "\n---\n**策略说明:**\n- **趋势**: 日线刚穿越0轴 + 4H确认。\n- **延续**: 日线0轴同向盘整后突破 + 1H确认。\n- **回调**: 日线同向趋势中回调 + 1H确认。\n"
         return content
 
     def format_volume(self, volume):
@@ -285,18 +296,18 @@ class OKXMonitor:
     def run(self):
         current_time = self.get_current_time_str()
         print(f"[{current_time}] 开始执行监控任务...")
-        if not self.ENABLE_MACD_SCANNER:
-            print(f"[{current_time}] MACD扫描功能已关闭。")
-            return
-
+        if not self.ENABLE_MACD_SCANNER: return
+        
         previous_watchlist = self.load_watchlist_state()
-        market_sentiment, sentiment_text = self.get_market_sentiment()
+        market_sentiment, sentiment_text, sentiment_details = self.get_market_sentiment()
         print(f"[{current_time}] 当前市场情绪: {sentiment_text}")
+        print(f"情绪分析依据:\n{sentiment_details}")
 
         instruments = self.get_perpetual_instruments()
         if not instruments: return
         
         all_opportunities = []
+        # ... (批处理逻辑无变化)
         max_workers = 5
         batch_size = 10 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -331,10 +342,12 @@ class OKXMonitor:
                     if new_actionable: title += f" + {len(new_actionable)}个新机会"
                 else:
                     title = f"💎 发现 {len(actionable_opportunities)} 个新机会"
-                content = self.create_opportunity_report(all_opportunities, market_sentiment, sentiment_text, upgraded_signals)
+                
+                # 更新函数调用，传入 sentiment_details
+                content = self.create_opportunity_report(all_opportunities, market_sentiment, sentiment_text, sentiment_details, upgraded_signals)
                 self.send_notification(title, content)
             else:
-                print(f"[{current_time}] 仅发现 {len(all_opportunities)} 个观察信号，本次不发送通知。")
+                print(f"[{current_time}] 仅发现 {len(all_opportunities)} 个观察信号，不发送通知。")
         else:
             print(f"[{current_time}] 本次未发现任何符合条件的信号。")
         
