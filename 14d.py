@@ -269,7 +269,9 @@ class OKXMonitor:
             if self.check_long_pullback_opportunity(d1_macd, h4_macd, h1_macd): return {**result_base, 'type': 'Long Pullback'}
             if self.check_short_pullback_opportunity(d1_macd, h4_macd, h1_macd): return {**result_base, 'type': 'Short Pullback'}
             return None
-        except Exception:
+        except Exception as e:
+            # 增加打印错误日志
+            print(f"[{self.get_current_time_str()}] 分析 {inst_id} 时发生未知错误: {e}")
             return None
 
     def create_opportunity_report(self, opportunities, market_sentiment, sentiment_text, sentiment_details, upgraded_signals):
@@ -305,10 +307,19 @@ class OKXMonitor:
         return f"{volume:.2f}"
 
     def load_watchlist_state(self):
+        # [加固] 确保在任何情况下都返回一个字典
+        if not os.path.exists(self.state_file):
+            return {}
         try:
-            if os.path.exists(self.state_file):
-                with open(self.state_file, 'r') as f: return json.load(f)
-        except Exception: return {}
+            with open(self.state_file, 'r') as f:
+                # 检查文件是否为空
+                content = f.read()
+                if not content:
+                    return {}
+                return json.loads(content)
+        except (json.JSONDecodeError, Exception) as e:
+            print(f"[{self.get_current_time_str()}] 加载状态文件失败: {e}, 将使用空列表。")
+            return {}
 
     def save_watchlist_state(self, watchlist):
         try:
@@ -324,33 +335,41 @@ class OKXMonitor:
         print(f"[{current_time}] 当前市场情绪: {sentiment_text}\n情绪分析依据:\n{sentiment_details}")
         instruments = self.get_perpetual_instruments()
         if not instruments: return
-        all_opportunities, max_workers, batch_size = [], 5, 10 
+        all_opportunities = []
+        max_workers = 5
+        batch_size = 10 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # 使用一个字典来传递额外的参数
             instrument_args = [{'inst_id': inst} for inst in instruments]
-            
-            # 使用 lambda 包装函数调用
             results = executor.map(lambda p: self.analyze_instrument_for_opportunities(**p), instrument_args)
 
-            # [新增] 健壮的错误处理
-            for result in results:
+            # [加固] 健壮的错误处理
+            for inst_arg, result in zip(instrument_args, results):
                 try:
                     if result:
                         all_opportunities.append(result)
                         print(f"[{current_time}] 发现信号: {result['inst_id']} ({result['type']})")
                 except Exception as e:
-                    print(f"[{current_time}] 处理单个币种结果时出错: {e}")
-
+                    inst_id = inst_arg.get('inst_id', '未知币种')
+                    print(f"[{current_time}] 处理币种 {inst_id} 的结果时出错: {e}")
 
         if all_opportunities:
             upgraded_signals, new_watchlist, actionable_opportunities = [], {}, []
-            for opp in all_opportunities:
-                if 'Watchlist' not in opp['type']:
-                    actionable_opportunities.append(opp)
-                    if opp['inst_id'] in previous_watchlist:
-                        upgraded_signals.append(opp)
-                        print(f"[{current_time}] 信号升级: {opp['inst_id']} 从 {previous_watchlist[opp['inst_id']]} 升级为 {opp['type']}")
-                if 'Watchlist' in opp['type']: new_watchlist[opp['inst_id']] = opp['type']
+            # [加固] 确保 all_opportunities 中的每个 opp 都是有效字典
+            for opp in filter(None, all_opportunities):
+                try:
+                    inst_id = opp['inst_id']
+                    opp_type = opp['type']
+                    if 'Watchlist' not in opp_type:
+                        actionable_opportunities.append(opp)
+                        # [加固] 确保 previous_watchlist 是字典
+                        if isinstance(previous_watchlist, dict) and inst_id in previous_watchlist:
+                            upgraded_signals.append(opp)
+                            print(f"[{current_time}] 信号升级: {inst_id} 从 {previous_watchlist[inst_id]} 升级为 {opp_type}")
+                    if 'Watchlist' in opp_type:
+                        new_watchlist[inst_id] = opp_type
+                except (TypeError, KeyError) as e:
+                    print(f"[{current_time}] 处理机会列表时遇到无效数据: {opp}, 错误: {e}")
+
             self.save_watchlist_state(new_watchlist)
             if actionable_opportunities:
                 title = ""
