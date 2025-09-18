@@ -127,8 +127,8 @@ class OKXMonitor:
         for i in range(len(macds) - 2, -1, -1):
             current_cross_type = 'golden' if macds[i]['macd'] > macds[i]['signal'] else 'death'
             if current_cross_type != last_cross_type:
-                return {'type': last_cross_type, 'index': i + 1, 'candles_ago': len(macds) - 2 - i}
-        return {'type': last_cross_type, 'index': 0, 'candles_ago': len(macds)}
+                return {'type': last_cross_type, 'index': i + 1}
+        return {'type': last_cross_type, 'index': 0}
 
     def get_market_sentiment(self):
         print(f"[{self.get_current_time_str()}] 正在分析市场情绪 (BTC)...")
@@ -160,14 +160,19 @@ class OKXMonitor:
         details_text = "\n".join([f"- {d}" for d in analysis_details])
         return sentiment, text, details_text
 
-    def is_signal_fresh(self, klines_df, macds, cross_type, atr):
+    def get_signal_freshness_info(self, klines_df, macds, cross_type, atr):
         last_cross = self.find_last_cross_info(macds)
-        if not last_cross or last_cross['type'] != cross_type: return False, 0
-        candles_ago = last_cross['candles_ago']
-        if candles_ago > self.MAX_CANDLES_AGO: return False, 0
-        
+        if not last_cross or last_cross['type'] != cross_type:
+            return False, 0, 0
+
         signal_index = last_cross['index']
-        if signal_index < 0 or signal_index >= len(atr): return False, 0
+        candles_ago = len(klines_df) - 1 - signal_index
+        
+        if candles_ago > self.MAX_CANDLES_AGO:
+            return False, 0, 0
+        
+        if signal_index < 0 or signal_index >= len(atr):
+            return False, 0, 0
             
         signal_price = klines_df['close'].iloc[signal_index]
         current_price = klines_df['close'].iloc[-1]
@@ -175,10 +180,15 @@ class OKXMonitor:
         
         price_change_since_signal = ((current_price - signal_price) / signal_price) * 100 if signal_price > 0 else 0
         
+        # 新增：计算信号发生后的时间（小时）
+        signal_timestamp = klines_df['ts'].iloc[signal_index] / 1000 # 转换为秒
+        current_timestamp = time.time()
+        hours_since_signal = (current_timestamp - signal_timestamp) / 3600
+
         if atr_at_signal > 0 and abs(current_price - signal_price) > (self.ATR_MULTIPLIER * atr_at_signal):
-            return False, price_change_since_signal
+            return False, price_change_since_signal, hours_since_signal
             
-        return True, price_change_since_signal
+        return True, price_change_since_signal, hours_since_signal
 
     def analyze_instrument_for_opportunities(self, inst_id):
         try:
@@ -208,29 +218,30 @@ class OKXMonitor:
             d1_atr = self.calculate_atr(d1_klines_df)
             h1_atr = self.calculate_atr(h1_klines_df)
 
-            # --- [重构后] 策略检查函数现在返回 (是否满足, 信号后价格变动) ---
+            # --- [重构后] 策略检查函数现在返回 (是否满足, 价格变动, 时间) ---
+            # ... (粘贴所有策略检查函数并修改以返回新信息)
             def check_long_trend_opportunity():
-                if len(d1_macd) < 2 or len(h4_macd) < 2: return 'None', 0
+                if len(d1_macd) < 2 or len(h4_macd) < 2: return 'None', 0, 0
                 d1_last, d1_prev, h4_last = d1_macd[-1], d1_macd[-2], h4_macd[-1]
                 is_fresh_cross_zero = ((d1_last['macd'] > 0 or d1_last['signal'] > 0) and (d1_prev['macd'] < 0 or d1_prev['signal'] < 0))
                 
-                daily_ok, price_change = False, 0
+                daily_ok, price_change, hours_since = False, 0, 0
                 if d1_last['macd'] > d1_last['signal']:
-                    is_fresh, price_change = self.is_signal_fresh(d1_klines_df, d1_macd, 'golden', d1_atr)
-                    if is_fresh_cross_zero or is_fresh:
-                        daily_ok = True
+                    is_fresh, price_change, hours_since = self.get_signal_freshness_info(d1_klines_df, d1_macd, 'golden', d1_atr)
+                    if is_fresh_cross_zero or is_fresh: daily_ok = True
 
-                if not daily_ok: return 'None', 0
+                if not daily_ok: return 'None', 0, 0
                 
                 four_hour_ok = (h4_last['macd'] > 0 and h4_last['signal'] > 0 and h4_last['macd'] > h4_last['signal'])
-                return ('Long Trend' if four_hour_ok else 'Long Watchlist'), price_change
-
-            # ... (其他策略函数也做类似修改)
-
+                return ('Long Trend' if four_hour_ok else 'Long Watchlist'), price_change, hours_since
+            
+            # ... (其他策略也需要类似修改)
+            
             # --- Analysis Flow ---
-            opp_type, price_change_since_signal = check_long_trend_opportunity()
+            opp_type, price_change, hours_since = check_long_trend_opportunity()
             if opp_type != 'None':
-                return {**result_base, 'type': opp_type, 'price_change_since_signal': price_change_since_signal}
+                return {**result_base, 'type': opp_type, 'price_change_since_signal': price_change, 'hours_since_signal': hours_since}
+            
             # ... (对其他策略调用也做类似处理)
             
             return None # Fallback
@@ -252,16 +263,19 @@ class OKXMonitor:
                 volume_str = self.format_volume(opp['volume'])
                 change_24h_str = f"📈 +{opp['price_change_24h']:.2f}%" if opp['price_change_24h'] > 0 else f"📉 {opp['price_change_24h']:.2f}%"
                 
-                # 新增：格式化信号后幅度
                 since_signal_change = opp.get('price_change_since_signal', 0)
                 since_signal_str = f"📈 +{since_signal_change:.2f}%" if since_signal_change > 0 else f"📉 {since_signal_change:.2f}%"
+                
+                # 新增：格式化信号时长
+                hours_since = opp.get('hours_since_signal', 0)
+                hours_since_str = f"{hours_since:.1f} H"
 
                 warning = " (逆大盘)" if (market_sentiment == 'Bullish' and 'Short' in opp['type']) or (market_sentiment == 'Bearish' and 'Long' in opp['type']) else ""
-                rows += f"| **{inst_name}** | {opp_type}{warning} | {since_signal_str} | {volume_str} | {change_24h_str} |\n"
+                rows += f"| **{inst_name}** | {opp_type}{warning} | {hours_since_str} | {since_signal_str} | {volume_str} | {change_24h_str} |\n"
             return rows
 
         # 新增：更新表头
-        table_header = "| 交易对 | 机会类型 | 信号后幅度 | 24H成交额 | 24H涨跌幅 |\n|:---|:---|:---|:---|:---|\n"
+        table_header = "| 交易对 | 机会类型 | 信号时长 | 信号后幅度 | 24H成交额 | 24H涨跌幅 |\n|:---|:---|:---|:---|:---|:---|\n"
 
         if upgraded_signals:
             content += "### ✨ 信号升级 ✨\n" + table_header
@@ -326,13 +340,13 @@ class OKXMonitor:
                 try:
                     inst_id = opp['inst_id']
                     opp_type = opp['type']
-                    if 'Watchlist' not in opp_type:
+                    if 'Watchlist' not in opp['type']:
                         actionable_opportunities.append(opp)
                         if isinstance(previous_watchlist, dict) and inst_id in previous_watchlist:
                             upgraded_signals.append(opp)
                             print(f"[{current_time}] 信号升级: {inst_id} 从 {previous_watchlist[inst_id]} 升级为 {opp_type}")
-                    if 'Watchlist' in opp_type:
-                        new_watchlist[inst_id] = opp_type
+                    if 'Watchlist' in opp['type']:
+                        new_watchlist[inst_id] = opp['type']
                 except (TypeError, KeyError) as e:
                     print(f"[{current_time}] 处理机会列表时遇到无效数据: {opp}, 错误: {e}")
             self.save_watchlist_state(new_watchlist)
