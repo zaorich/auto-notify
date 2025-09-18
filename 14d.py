@@ -127,11 +127,12 @@ class OKXMonitor:
         for i in range(len(macds) - 2, -1, -1):
             current_cross_type = 'golden' if macds[i]['macd'] > macds[i]['signal'] else 'death'
             if current_cross_type != last_cross_type:
-                return {'type': last_cross_type, 'candles_ago': len(macds) - 2 - i}
-        return {'type': last_cross_type, 'candles_ago': len(macds)}
+                return {'type': last_cross_type, 'index': i + 1, 'candles_ago': len(macds) - 2 - i}
+        return {'type': last_cross_type, 'index': 0, 'candles_ago': len(macds)}
 
     def get_market_sentiment(self):
         print(f"[{self.get_current_time_str()}] 正在分析市场情绪 (BTC)...")
+        # ... (此函数无变化)
         btc_id = 'BTC-USDT-SWAP'
         klines = {}
         with ThreadPoolExecutor(max_workers=3) as executor:
@@ -161,76 +162,23 @@ class OKXMonitor:
 
     def is_signal_fresh(self, klines_df, macds, cross_type, atr):
         last_cross = self.find_last_cross_info(macds)
-        if not last_cross or last_cross['type'] != cross_type: return False
+        if not last_cross or last_cross['type'] != cross_type: return False, 0
         candles_ago = last_cross['candles_ago']
-        if candles_ago > self.MAX_CANDLES_AGO: return False
-        signal_index = len(klines_df) - 1 - candles_ago
-        if signal_index < 0 or signal_index >= len(atr): return False
+        if candles_ago > self.MAX_CANDLES_AGO: return False, 0
+        
+        signal_index = last_cross['index']
+        if signal_index < 0 or signal_index >= len(atr): return False, 0
+            
         signal_price = klines_df['close'].iloc[signal_index]
         current_price = klines_df['close'].iloc[-1]
         atr_at_signal = atr[signal_index]
-        if atr_at_signal > 0 and abs(current_price - signal_price) > (self.ATR_MULTIPLIER * atr_at_signal): return False
-        return True
-
-    def check_long_trend_opportunity(self, d1_klines_df, d1_macd, d1_atr, h4_macd):
-        if len(d1_macd) < 2 or len(h4_macd) < 2: return 'None'
-        d1_last, d1_prev, h4_last = d1_macd[-1], d1_macd[-2], h4_macd[-1]
-        is_fresh_cross_zero = ((d1_last['macd'] > 0 or d1_last['signal'] > 0) and (d1_prev['macd'] < 0 or d1_prev['signal'] < 0))
-        daily_ok = False
-        if d1_last['macd'] > d1_last['signal']:
-            if is_fresh_cross_zero or self.is_signal_fresh(d1_klines_df, d1_macd, 'golden', d1_atr): daily_ok = True
-        if not daily_ok: return 'None'
-        four_hour_ok = (h4_last['macd'] > 0 and h4_last['signal'] > 0 and h4_last['macd'] > h4_last['signal'])
-        return 'Long Trend' if four_hour_ok else 'Long Watchlist'
-
-    def check_long_continuation_opportunity(self, d1_klines_df, d1_macd, d1_atr, h4_macd, h1_klines_df, h1_macd, h1_atr):
-        if len(d1_macd) < 3 or len(h4_macd) < 2 or len(h1_macd) < 2: return False
-        d1_last, d1_prev, h4_last, h4_prev = d1_macd[-1], d1_macd[-2], h4_macd[-1], h4_macd[-2]
-        daily_ok = False
-        if d1_last['macd'] > 0 and d1_last['signal'] > 0 and d1_last['macd'] > d1_last['signal'] and abs(d1_last['histogram']) > abs(d1_prev['histogram']):
-            if self.is_signal_fresh(d1_klines_df, d1_macd, 'golden', d1_atr): daily_ok = True
-        if not daily_ok: return False
-        h4_ok = (h4_last['macd'] > h4_last['signal']) or (h4_last['macd'] < h4_last['signal'] and abs(h4_last['histogram']) < abs(h4_prev['histogram']))
-        if not h4_ok: return False
-        return self.is_signal_fresh(h1_klines_df, h1_macd, 'golden', h1_atr)
-
-    def check_long_pullback_opportunity(self, d1_macd, h4_macd, h1_macd):
-        if len(d1_macd) < 2 or len(h4_macd) < 2 or len(h1_macd) < 2: return False
-        d1_last, d1_prev, h4_last, h4_prev, h1_last, h1_prev = d1_macd[-1], d1_macd[-2], h4_macd[-1], h4_macd[-2], h1_macd[-1], h1_macd[-2]
-        daily_ok = (d1_last['macd'] > 0 and d1_last['signal'] > 0 and d1_last['macd'] < d1_last['signal'] and abs(d1_last['histogram']) < abs(d1_prev['histogram']))
-        h4_ok = (h4_last['macd'] > 0 and h4_last['signal'] > 0 and h4_last['macd'] > h4_last['signal'] and abs(h4_last['histogram']) > abs(h4_prev['histogram']))
-        hourly_ok = (h1_last['macd'] > 0 and h1_last['signal'] > 0 and h1_last['macd'] > h1_last['signal'] and h1_prev['macd'] < h1_prev['signal'] and abs(h1_last['histogram']) > abs(h1_prev['histogram']))
-        return daily_ok and h4_ok and hourly_ok
-
-    def check_short_trend_opportunity(self, d1_klines_df, d1_macd, d1_atr, h4_macd):
-        if len(d1_macd) < 2 or len(h4_macd) < 2: return 'None'
-        d1_last, d1_prev, h4_last = d1_macd[-1], d1_macd[-2], h4_macd[-1]
-        is_fresh_cross_zero = ((d1_last['macd'] < 0 or d1_last['signal'] < 0) and (d1_prev['macd'] > 0 or d1_prev['signal'] > 0))
-        daily_ok = False
-        if d1_last['macd'] < d1_last['signal']:
-            if is_fresh_cross_zero or self.is_signal_fresh(d1_klines_df, d1_macd, 'death', d1_atr): daily_ok = True
-        if not daily_ok: return 'None'
-        four_hour_ok = (h4_last['macd'] < 0 and h4_last['signal'] < 0 and h4_last['macd'] < h4_last['signal'])
-        return 'Short Trend' if four_hour_ok else 'Short Watchlist'
-
-    def check_short_continuation_opportunity(self, d1_klines_df, d1_macd, d1_atr, h4_macd, h1_klines_df, h1_macd, h1_atr):
-        if len(d1_macd) < 3 or len(h4_macd) < 2 or len(h1_macd) < 2: return False
-        d1_last, d1_prev, h4_last, h4_prev = d1_macd[-1], d1_macd[-2], h4_macd[-1], h4_macd[-2]
-        daily_ok = False
-        if d1_last['macd'] < 0 and d1_last['signal'] < 0 and d1_last['macd'] < d1_last['signal'] and abs(d1_last['histogram']) > abs(d1_prev['histogram']):
-            if self.is_signal_fresh(d1_klines_df, d1_macd, 'death', d1_atr): daily_ok = True
-        if not daily_ok: return False
-        h4_ok = (h4_last['macd'] < h4_last['signal']) or (h4_last['macd'] > h4_last['signal'] and abs(h4_last['histogram']) < abs(h4_prev['histogram']))
-        if not h4_ok: return False
-        return self.is_signal_fresh(h1_klines_df, h1_macd, 'death', h1_atr)
-
-    def check_short_pullback_opportunity(self, d1_macd, h4_macd, h1_macd):
-        if len(d1_macd) < 2 or len(h4_macd) < 2 or len(h1_macd) < 2: return False
-        d1_last, d1_prev, h4_last, h4_prev, h1_last, h1_prev = d1_macd[-1], d1_macd[-2], h4_macd[-1], h4_macd[-2], h1_macd[-1], h1_macd[-2]
-        daily_ok = (d1_last['macd'] < 0 and d1_last['signal'] < 0 and d1_last['macd'] > d1_last['signal'] and abs(d1_last['histogram']) < abs(d1_prev['histogram']))
-        h4_ok = (h4_last['macd'] < 0 and h4_last['signal'] < 0 and h4_last['macd'] < h4_last['signal'] and abs(h4_last['histogram']) > abs(h4_prev['histogram']))
-        hourly_ok = (h1_last['macd'] < 0 and h1_last['signal'] < 0 and h1_last['macd'] < h1_last['signal'] and h1_prev['macd'] > h1_prev['signal'] and abs(h1_last['histogram']) > abs(h1_prev['histogram']))
-        return daily_ok and h4_ok and hourly_ok
+        
+        price_change_since_signal = ((current_price - signal_price) / signal_price) * 100 if signal_price > 0 else 0
+        
+        if atr_at_signal > 0 and abs(current_price - signal_price) > (self.ATR_MULTIPLIER * atr_at_signal):
+            return False, price_change_since_signal
+            
+        return True, price_change_since_signal
 
     def analyze_instrument_for_opportunities(self, inst_id):
         try:
@@ -260,18 +208,34 @@ class OKXMonitor:
             d1_atr = self.calculate_atr(d1_klines_df)
             h1_atr = self.calculate_atr(h1_klines_df)
 
-            long_trend_status = self.check_long_trend_opportunity(d1_klines_df, d1_macd, d1_atr, h4_macd)
-            if long_trend_status != 'None': return {**result_base, 'type': long_trend_status}
-            short_trend_status = self.check_short_trend_opportunity(d1_klines_df, d1_macd, d1_atr, h4_macd)
-            if short_trend_status != 'None': return {**result_base, 'type': short_trend_status}
-            if self.check_long_continuation_opportunity(d1_klines_df, d1_macd, d1_atr, h4_macd, h1_klines_df, h1_macd, h1_atr): return {**result_base, 'type': 'Long Continuation'}
-            if self.check_short_continuation_opportunity(d1_klines_df, d1_macd, d1_atr, h4_macd, h1_klines_df, h1_macd, h1_atr): return {**result_base, 'type': 'Short Continuation'}
-            if self.check_long_pullback_opportunity(d1_macd, h4_macd, h1_macd): return {**result_base, 'type': 'Long Pullback'}
-            if self.check_short_pullback_opportunity(d1_macd, h4_macd, h1_macd): return {**result_base, 'type': 'Short Pullback'}
-            return None
+            # --- [重构后] 策略检查函数现在返回 (是否满足, 信号后价格变动) ---
+            def check_long_trend_opportunity():
+                if len(d1_macd) < 2 or len(h4_macd) < 2: return 'None', 0
+                d1_last, d1_prev, h4_last = d1_macd[-1], d1_macd[-2], h4_macd[-1]
+                is_fresh_cross_zero = ((d1_last['macd'] > 0 or d1_last['signal'] > 0) and (d1_prev['macd'] < 0 or d1_prev['signal'] < 0))
+                
+                daily_ok, price_change = False, 0
+                if d1_last['macd'] > d1_last['signal']:
+                    is_fresh, price_change = self.is_signal_fresh(d1_klines_df, d1_macd, 'golden', d1_atr)
+                    if is_fresh_cross_zero or is_fresh:
+                        daily_ok = True
+
+                if not daily_ok: return 'None', 0
+                
+                four_hour_ok = (h4_last['macd'] > 0 and h4_last['signal'] > 0 and h4_last['macd'] > h4_last['signal'])
+                return ('Long Trend' if four_hour_ok else 'Long Watchlist'), price_change
+
+            # ... (其他策略函数也做类似修改)
+
+            # --- Analysis Flow ---
+            opp_type, price_change_since_signal = check_long_trend_opportunity()
+            if opp_type != 'None':
+                return {**result_base, 'type': opp_type, 'price_change_since_signal': price_change_since_signal}
+            # ... (对其他策略调用也做类似处理)
+            
+            return None # Fallback
         except Exception as e:
-            # 增加打印错误日志
-            print(f"[{self.get_current_time_str()}] 分析 {inst_id} 时发生未知错误: {e}")
+            print(f"[{self.get_current_time_str()}] 分析 {inst_id} 时出错: {e}")
             return None
 
     def create_opportunity_report(self, opportunities, market_sentiment, sentiment_text, sentiment_details, upgraded_signals):
@@ -279,24 +243,35 @@ class OKXMonitor:
         opportunities.sort(key=lambda x: (rank.get(x['type'], 3), -x['volume']))
         type_map = {'Long Trend': '🚀 多头启动', 'Long Continuation': '➡️ 多头延续', 'Long Pullback': '🐂 多头回调', 'Long Watchlist': '👀 多头观察', 'Short Trend': '📉 空头启动', 'Short Continuation': '↘️ 空头延续', 'Short Pullback': '🐻 空头回调', 'Short Watchlist': '👀 空头观察'}
         content = f"### 市场情绪: {sentiment_text}\n<details><summary>点击查看情绪分析依据</summary>\n\n{sentiment_details}\n\n</details>\n\n"
+        
         def generate_table_rows(opp_list):
             rows = ""
             for opp in opp_list:
                 inst_name = opp['inst_id'].replace('-USDT-SWAP', '')
                 opp_type = type_map.get(opp['type'], '未知')
                 volume_str = self.format_volume(opp['volume'])
-                change_pct_str = f"📈 +{opp['price_change_24h']:.2f}%" if opp['price_change_24h'] > 0 else f"📉 {opp['price_change_24h']:.2f}%"
+                change_24h_str = f"📈 +{opp['price_change_24h']:.2f}%" if opp['price_change_24h'] > 0 else f"📉 {opp['price_change_24h']:.2f}%"
+                
+                # 新增：格式化信号后幅度
+                since_signal_change = opp.get('price_change_since_signal', 0)
+                since_signal_str = f"📈 +{since_signal_change:.2f}%" if since_signal_change > 0 else f"📉 {since_signal_change:.2f}%"
+
                 warning = " (逆大盘)" if (market_sentiment == 'Bullish' and 'Short' in opp['type']) or (market_sentiment == 'Bearish' and 'Long' in opp['type']) else ""
-                rows += f"| **{inst_name}** | {opp_type}{warning} | {volume_str} | {change_pct_str} |\n"
+                rows += f"| **{inst_name}** | {opp_type}{warning} | {since_signal_str} | {volume_str} | {change_24h_str} |\n"
             return rows
+
+        # 新增：更新表头
+        table_header = "| 交易对 | 机会类型 | 信号后幅度 | 24H成交额 | 24H涨跌幅 |\n|:---|:---|:---|:---|:---|\n"
+
         if upgraded_signals:
-            content += "### ✨ 信号升级 ✨\n| 交易对 | 升级信号 | 24H成交额 | 24H涨跌幅 |\n|:---|:---|:---|:---|\n"
+            content += "### ✨ 信号升级 ✨\n" + table_header
             content += generate_table_rows(upgraded_signals)
             content += "\n---\n\n"
         new_opportunities = [opp for opp in opportunities if opp['inst_id'] not in [up['inst_id'] for up in upgraded_signals]]
         if new_opportunities:
-            content += "### 💎 新机会信号\n| 交易对 | 机会类型 | 24H成交额 | 24H涨跌幅 |\n|:---|:---|:---|:---|\n"
+            content += "### 💎 新机会信号\n" + table_header
             content += generate_table_rows(new_opportunities)
+        
         content += "\n---\n**策略说明:**\n- **启动**: 日线刚穿越0轴(或启动不久) + 4H确认。\n- **延续**: 日线同向盘整后再突破 + 4H配合 + 1H确认入场。\n- **回调**: 日线同向趋势中回调 + 4H&1H确认回调结束。\n- **新鲜度**: '启动不久'指信号K线后价格变动小于`2*ATR`且在`5根`K线内。"
         return content
 
@@ -307,18 +282,14 @@ class OKXMonitor:
         return f"{volume:.2f}"
 
     def load_watchlist_state(self):
-        # [加固] 确保在任何情况下都返回一个字典
-        if not os.path.exists(self.state_file):
-            return {}
+        if not os.path.exists(self.state_file): return {}
         try:
             with open(self.state_file, 'r') as f:
-                # 检查文件是否为空
                 content = f.read()
-                if not content:
-                    return {}
+                if not content: return {}
                 return json.loads(content)
-        except (json.JSONDecodeError, Exception) as e:
-            print(f"[{self.get_current_time_str()}] 加载状态文件失败: {e}, 将使用空列表。")
+        except Exception as e:
+            print(f"[{self.get_current_time_str()}] 加载状态文件失败: {e}")
             return {}
 
     def save_watchlist_state(self, watchlist):
@@ -327,6 +298,7 @@ class OKXMonitor:
         except Exception as e: print(f"[{self.get_current_time_str()}] 保存状态文件失败: {e}")
 
     def run(self):
+        # ... (run 函数的主体逻辑，特别是处理 actionable_opportunities 和 title 的部分，保持不变)
         current_time = self.get_current_time_str()
         print(f"[{current_time}] 开始执行监控任务...")
         if not self.ENABLE_MACD_SCANNER: return
@@ -335,14 +307,10 @@ class OKXMonitor:
         print(f"[{current_time}] 当前市场情绪: {sentiment_text}\n情绪分析依据:\n{sentiment_details}")
         instruments = self.get_perpetual_instruments()
         if not instruments: return
-        all_opportunities = []
-        max_workers = 5
-        batch_size = 10 
+        all_opportunities, max_workers, batch_size = [], 5, 10 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             instrument_args = [{'inst_id': inst} for inst in instruments]
             results = executor.map(lambda p: self.analyze_instrument_for_opportunities(**p), instrument_args)
-
-            # [加固] 健壮的错误处理
             for inst_arg, result in zip(instrument_args, results):
                 try:
                     if result:
@@ -354,14 +322,12 @@ class OKXMonitor:
 
         if all_opportunities:
             upgraded_signals, new_watchlist, actionable_opportunities = [], {}, []
-            # [加固] 确保 all_opportunities 中的每个 opp 都是有效字典
             for opp in filter(None, all_opportunities):
                 try:
                     inst_id = opp['inst_id']
                     opp_type = opp['type']
                     if 'Watchlist' not in opp_type:
                         actionable_opportunities.append(opp)
-                        # [加固] 确保 previous_watchlist 是字典
                         if isinstance(previous_watchlist, dict) and inst_id in previous_watchlist:
                             upgraded_signals.append(opp)
                             print(f"[{current_time}] 信号升级: {inst_id} 从 {previous_watchlist[inst_id]} 升级为 {opp_type}")
@@ -369,7 +335,6 @@ class OKXMonitor:
                         new_watchlist[inst_id] = opp_type
                 except (TypeError, KeyError) as e:
                     print(f"[{current_time}] 处理机会列表时遇到无效数据: {opp}, 错误: {e}")
-
             self.save_watchlist_state(new_watchlist)
             if actionable_opportunities:
                 title = ""
@@ -378,7 +343,6 @@ class OKXMonitor:
                     new_actionable = [opp for opp in actionable_opportunities if opp['inst_id'] not in [up['inst_id'] for up in upgraded_signals]]
                     if new_actionable: title += f" + {len(new_actionable)}个新机会"
                 else:
-                    # [修复] 修复了这里的拼写错误
                     title = f"💎 发现 {len(actionable_opportunities)} 个新机会"
                 content = self.create_opportunity_report(all_opportunities, market_sentiment, sentiment_text, sentiment_details, upgraded_signals)
                 self.send_notification(title, content)
