@@ -18,14 +18,10 @@ class OKXMonitor:
         self.MACD_VOLUME_THRESHOLD = 10_000_000
         self.ATR_MULTIPLIER = 2.0
         self.MAX_CANDLES_AGO = 5
-        
-        # --- [新] 开发者调试模式开关 ---
-        self.DEV_MODE = True  # 设置为 True 来开启详细的调试输出
-
+        self.DEV_MODE = False # 保持关闭以获得简洁报告
         self.session = self._create_session()
         self.timezone = pytz.timezone('Asia/Shanghai')
         self.state_file = 'watchlist_state.json'
-        # [新] 用于存储调试信息
         self.debug_info = []
 
     def _create_session(self):
@@ -136,8 +132,19 @@ class OKXMonitor:
                 return {'type': last_cross_type, 'index': i + 1}
         return {'type': last_cross_type, 'index': 0}
 
+    def find_last_dea_zero_cross_info(self, macds):
+        """[新] 查找DEA慢线最后一次穿越0轴的信息"""
+        if len(macds) < 2: return None
+        for i in range(len(macds) - 2, -1, -1):
+            dea_current = macds[i]['signal']
+            dea_next = macds[i+1]['signal']
+            if dea_current <= 0 and dea_next > 0:
+                return {'type': 'bullish', 'index': i + 1}
+            if dea_current >= 0 and dea_next < 0:
+                return {'type': 'bearish', 'index': i + 1}
+        return None
+
     def get_market_sentiment(self):
-        # ... (此函数无变化)
         print(f"[{self.get_current_time_str()}] 正在分析市场情绪 (BTC)...")
         btc_id = 'BTC-USDT-SWAP'
         klines = {}
@@ -192,7 +199,6 @@ class OKXMonitor:
             if len(h1_klines) < 24: return None
             daily_volume = sum(float(kline[7]) for kline in h1_klines[-24:])
             if daily_volume < self.MACD_VOLUME_THRESHOLD: return None
-            
             d1_klines, h4_klines, ticker_data = None, None, None
             with ThreadPoolExecutor(max_workers=3) as executor:
                 future_d1 = executor.submit(self.get_kline_data, inst_id, '1D', 100)
@@ -208,43 +214,49 @@ class OKXMonitor:
             d1_klines_df = pd.DataFrame(d1_klines, columns=['ts', 'open', 'high', 'low', 'close', 'vol', 'volCcy', 'volCcyQuote', 'confirm']).astype(float)
             h1_klines_df = pd.DataFrame(h1_klines, columns=['ts', 'open', 'high', 'low', 'close', 'vol', 'volCcy', 'volCcyQuote', 'confirm']).astype(float)
             
-            all_macds = {
-                '1D': self.calculate_macd(d1_klines_df['close']),
-                '4H': self.calculate_macd([float(k[4]) for k in h4_klines]),
-                '1H': self.calculate_macd(h1_klines_df['close'])
-            }
-            all_atrs = {
-                '1D': self.calculate_atr(d1_klines_df),
-                '1H': self.calculate_atr(h1_klines_df)
-            }
+            d1_macd = self.calculate_macd(d1_klines_df['close'])
+            h4_macd = self.calculate_macd([float(k[4]) for k in h4_klines])
+            h1_macd = self.calculate_macd(h1_klines_df['close'])
+            d1_atr = self.calculate_atr(d1_klines_df)
+            h1_atr = self.calculate_atr(h1_klines_df)
+
+            # [新] 计算日线DEA穿0轴信息
+            trend_change_pct = 0
+            trend_duration_days = 0
+            dea_cross_info = self.find_last_dea_zero_cross_info(d1_macd)
+            if dea_cross_info:
+                cross_index = dea_cross_info['index']
+                cross_price = d1_klines_df['close'].iloc[cross_index]
+                current_price = d1_klines_df['close'].iloc[-1]
+                if cross_price > 0:
+                    trend_change_pct = ((current_price - cross_price) / cross_price) * 100
+                cross_timestamp = d1_klines_df['ts'].iloc[cross_index] / 1000
+                trend_duration_days = (time.time() - cross_timestamp) / (3600 * 24)
+            result_base['trend_change_pct'] = trend_change_pct
+            result_base['trend_duration_days'] = trend_duration_days
             
-            # --- [重构] 策略检查函数现在返回 (是否满足, 价格变动, 时间, [调试信息]) ---
+            # --- Analysis Flow...
+            # --- (策略检查函数本身无变化, 仅修改了 analyze_instrument_for_opportunities 的返回结构)
             def check_long_trend_opportunity():
-                d1_macd, h4_macd = all_macds['1D'], all_macds['4H']
                 if len(d1_macd) < 2 or len(h4_macd) < 2: return 'None', 0, 0
                 d1_last, d1_prev, h4_last = d1_macd[-1], d1_macd[-2], h4_macd[-1]
                 is_fresh_cross_zero = ((d1_last['macd'] > 0 or d1_last['signal'] > 0) and (d1_prev['macd'] < 0 or d1_prev['signal'] < 0))
-                daily_ok, price_change, hours_since, debug = False, 0, 0, {}
+                daily_ok, price_change, hours_since = False, 0, 0
                 if d1_last['macd'] > d1_last['signal']:
-                    is_fresh, price_change, hours_since = self.get_signal_freshness_info(d1_klines_df, d1_macd, 'golden', all_atrs['1D'])
-                    if is_fresh_cross_zero or is_fresh: 
-                        daily_ok = True
-                        debug['condition'] = "日线刚上穿0轴或启动不久"
+                    is_fresh, price_change, hours_since = self.get_signal_freshness_info(d1_klines_df, d1_macd, 'golden', d1_atr)
+                    if is_fresh_cross_zero or is_fresh: daily_ok = True
                 if not daily_ok: return 'None', 0, 0
                 four_hour_ok = (h4_last['macd'] > 0 and h4_last['signal'] > 0 and h4_last['macd'] > h4_last['signal'])
-                if four_hour_ok: debug['confirmation'] = "4H 0上金叉确认"
-                return ('Long Trend' if four_hour_ok else 'Long Watchlist'), price_change, hours_since, debug
+                return ('Long Trend' if four_hour_ok else 'Long Watchlist'), price_change, hours_since
             
-            # ... (其他策略函数也需要类似修改以返回 debug_info)
+            # ... 其他策略函数 ...
             
-            # --- Analysis Flow ---
-            opp_type, price_change, hours_since, debug_info = check_long_trend_opportunity()
+            opp_type, price_change, hours_since = check_long_trend_opportunity()
             if opp_type != 'None':
-                result = {**result_base, 'type': opp_type, 'price_change_since_signal': price_change, 'hours_since_signal': hours_since}
-                if self.DEV_MODE and len(self.debug_info) < 3: self.debug_info.append({**result, 'debug': debug_info, 'macds': all_macds})
-                return result
-
-            # ... (对其他策略调用也做类似处理)
+                return {**result_base, 'type': opp_type, 'price_change_since_signal': price_change, 'hours_since_signal': hours_since}
+            
+            # ... 对其他策略调用也做类似处理 ...
+            
             return None
         except Exception as e:
             print(f"[{self.get_current_time_str()}] 分析 {inst_id} 时出错: {e}")
@@ -267,11 +279,19 @@ class OKXMonitor:
                 since_signal_str = f"📈 +{since_signal_change:.2f}%" if since_signal_change > 0 else f"📉 {since_signal_change:.2f}%"
                 hours_since = opp.get('hours_since_signal', 0)
                 hours_since_str = f"{hours_since:.1f} H"
+                
+                # 新增：格式化趋势指标
+                trend_change = opp.get('trend_change_pct', 0)
+                trend_change_str = f"📈 +{trend_change:.1f}%" if trend_change > 0 else f"📉 {trend_change:.1f}%"
+                trend_days = opp.get('trend_duration_days', 0)
+                trend_days_str = f"{trend_days:.1f}天"
+                
                 warning = " (逆大盘)" if (market_sentiment == 'Bullish' and 'Short' in opp['type']) or (market_sentiment == 'Bearish' and 'Long' in opp['type']) else ""
-                rows += f"| **{inst_name}** | {opp_type}{warning} | {hours_since_str} | {since_signal_str} | {volume_str} | {change_24h_str} |\n"
+                rows += f"| **{inst_name}** | {opp_type}{warning} | {since_signal_str} | {hours_since_str} | {trend_change_str} | {trend_days_str} | {volume_str} | {change_24h_str} |\n"
             return rows
 
-        table_header = "| 交易对 | 机会类型 | 信号时长 | 信号后幅度 | 24H成交额 | 24H涨跌幅 |\n|:---|:---|:---|:---|:---|:---|\n"
+        # 新增：更新表头
+        table_header = "| 交易对 | 机会类型 | 信号后幅度 | 信号时长 | 趋势幅度 | 趋势时长 | 24H成交额 | 24H涨跌幅 |\n|:---|:---|:---|:---|:---|:---|:---|:---|\n"
 
         if upgraded_signals:
             content += "### ✨ 信号升级 ✨\n" + table_header
@@ -282,24 +302,7 @@ class OKXMonitor:
             content += "### 💎 新机会信号\n" + table_header
             content += generate_table_rows(new_opportunities)
         
-        # [新] 添加调试信息部分
-        if self.DEV_MODE and self.debug_info:
-            content += "\n---\n### 🧪 信号调试信息 (前3个)\n"
-            for info in self.debug_info:
-                content += f"\n#### `{info['inst_id']}` - {type_map.get(info['type'])} \n"
-                content += f"- **满足条件**: {info['debug'].get('condition', 'N/A')}\n"
-                content += f"- **确认条件**: {info['debug'].get('confirmation', 'N/A')}\n"
-                content += f"- **信号后**: {info.get('hours_since_signal', 0):.1f}小时, 价格变动 {info.get('price_change_since_signal', 0):.2f}%\n"
-                content += "```\n"
-                for tf in ['1D', '4H', '1H']:
-                    if tf in info['macds'] and len(info['macds'][tf]) >= 2:
-                        last, prev = info['macds'][tf][-1], info['macds'][tf][-2]
-                        content += f"[{tf}] MACD:\n"
-                        content += f"  - 最新: D:{last['macd']:.4f}, S:{last['signal']:.4f}, H:{last['histogram']:.4f}\n"
-                        content += f"  - 上期: D:{prev['macd']:.4f}, S:{prev['signal']:.4f}, H:{prev['histogram']:.4f}\n"
-                content += "```\n"
-
-        content += "\n---\n**策略说明:**\n- **启动**: 日线刚穿越0轴(或启动不久) + 4H确认。\n- **延续**: 日线同向盘整后再突破 + 4H配合 + 1H确认入场。\n- **回调**: 日线同向趋势中回调 + 4H&1H确认回调结束。\n- **新鲜度**: '启动不久'指信号K线后价格变动小于`2*ATR`且在`5根`K线内。"
+        content += "\n---\n**策略说明:**\n- **趋势指标**: 基于日线DEA慢线穿越0轴计算。\n- **信号指标**: 基于具体策略的触发信号计算。\n- **新鲜度**: '启动不久'指信号K线后价格变动小于`2*ATR`且在`5根`K线内。"
         return content
 
     def format_volume(self, volume):
@@ -325,6 +328,7 @@ class OKXMonitor:
         except Exception as e: print(f"[{self.get_current_time_str()}] 保存状态文件失败: {e}")
 
     def run(self):
+        # ... (run 函数的主体逻辑，特别是处理 actionable_opportunities 和 title 的部分，保持不变)
         current_time = self.get_current_time_str()
         print(f"[{current_time}] 开始执行监控任务...")
         if not self.ENABLE_MACD_SCANNER: return
@@ -352,13 +356,13 @@ class OKXMonitor:
                 try:
                     inst_id = opp['inst_id']
                     opp_type = opp['type']
-                    if 'Watchlist' not in opp_type:
+                    if 'Watchlist' not in opp['type']:
                         actionable_opportunities.append(opp)
                         if isinstance(previous_watchlist, dict) and inst_id in previous_watchlist:
                             upgraded_signals.append(opp)
                             print(f"[{current_time}] 信号升级: {inst_id} 从 {previous_watchlist[inst_id]} 升级为 {opp_type}")
-                    if 'Watchlist' in opp_type:
-                        new_watchlist[inst_id] = opp_type
+                    if 'Watchlist' in opp['type']:
+                        new_watchlist[inst_id] = opp['type']
                 except (TypeError, KeyError) as e:
                     print(f"[{current_time}] 处理机会列表时遇到无效数据: {opp}, 错误: {e}")
             self.save_watchlist_state(new_watchlist)
