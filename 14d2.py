@@ -23,8 +23,7 @@ class OKXMonitor:
         self.ATR_MULTIPLIER = 2.0
         self.MAX_CANDLES_AGO = 5
 
-        # --- <<< 新增开关 >>> ---
-        # 设为True，则在通知末尾附加详细的策略说明。默认为False，保持通知简洁。
+        # --- 功能开关 ---
         self.SEND_STRATEGY_EXPLANATION = False
         
         # --- 系统配置 ---
@@ -689,7 +688,7 @@ class OKXMonitor:
         report += "| 交易对 | 领袖分 | RS分 | 启动 | 延续/回调 | 凤凰 |\n"
         report += "|:---|:---:|:---:|:---:|:---:|:---:|\n"
 
-        for log in self.debug_logs[:20]: # Limit to top 20 to prevent notification failure
+        for log in self.debug_logs[:20]:
             inst_name = log['inst_id'].replace('-USDT-SWAP', '')
             leader_score_val = log.get('leader_score')
             leader_str = f"{leader_score_val:.0f}" if leader_score_val is not None else 'N/A'
@@ -718,7 +717,7 @@ class OKXMonitor:
         type_map = { 'Long Trend': '🚀 多头启动', 'Long Phoenix': '🔥 凤凰信号', 'Long Continuation': '➡️ 多头延续', 'Long Pullback': '🐂 多头回调', 'Long Watchlist': '👀 多头观察', 'Short Trend': '📉 空头启动', 'Short Continuation': '↘️ 空头延续', 'Short Pullback': '🐻 空头回调', 'Short Watchlist': '👀 空头观察' }
         
         content = f"{backtest_report}\n---\n"
-        content += f"### 🔥 当前最新机会信号 (仅显示RS > 80)\n"
+        content += f"### 🔥 当前最新机会信号\n" # <<< 修正: 移除(仅显示RS > 80)
         content += f"**市场情绪: {market_info.get('text', 'N/A')}**\n\n{market_info.get('details', '')}\n"
 
         def generate_table(title, opp_list):
@@ -755,14 +754,13 @@ class OKXMonitor:
         new_actionable = [opp for opp in opportunities if opp['inst_id'] not in upgraded_ids]
         
         if upgraded_signals:
-            content += generate_table('✨ 信号升级 ✨ (RS > 80)', upgraded_signals)
+            content += generate_table('✨ 信号升级 ✨', upgraded_signals) # <<< 修正: 移除标题中的过滤信息
         if new_actionable:
-            content += generate_table('💎 新机会信号 (RS > 80)', new_actionable)
+            content += generate_table('💎 新机会信号', new_actionable) # <<< 修正: 移除标题中的过滤信息
         
         if not upgraded_signals and not new_actionable:
-            content += "\n在当前时间点，未发现RS评分高于80的实时交易机会。\n"
+            content += "\n在当前时间点，未发现任何可操作的实时交易机会。\n"
 
-        # <<< 使用开关控制策略说明的附加 >>>
         if self.SEND_STRATEGY_EXPLANATION:
             content += self.get_strategy_explanation()
             
@@ -914,39 +912,28 @@ class OKXMonitor:
         
         self.save_watchlist_state(new_watchlist)
         
-        initial_actionable_count = len(actionable_opportunities)
-        actionable_opportunities_filtered = [
-            opp for opp in actionable_opportunities 
-            if opp.get('rs_score') is not None and opp.get('rs_score') > 80
-        ]
-        upgraded_signals_filtered = [
-            opp for opp in upgraded_signals 
-            if opp.get('rs_score') is not None and opp.get('rs_score') > 80
-        ]
-        print(f"[{self.get_current_time_str()}] 初始发现 {initial_actionable_count} 个可操作信号, 经过RS > 80筛选后剩余 {len(actionable_opportunities_filtered)} 个。")
-
         debug_report_for_notification = self.create_debug_report_md()
 
-        if actionable_opportunities_filtered:
+        if actionable_opportunities:
             title = ""
-            new_actionable_count = len(actionable_opportunities_filtered) - len(upgraded_signals_filtered)
-            if upgraded_signals_filtered:
-                title += f"✨ {len(upgraded_signals_filtered)}个升级(RS>80)"
+            new_actionable_count = len(actionable_opportunities) - len(upgraded_signals)
+            if upgraded_signals:
+                title += f"✨ {len(upgraded_signals)}个升级"
                 if new_actionable_count > 0:
                     title += f" + {new_actionable_count}个新机会"
             else:
-                title = f"💎 发现 {len(actionable_opportunities_filtered)} 个新机会(RS>80)"
+                title = f"💎 发现 {len(actionable_opportunities)} 个新机会"
             
             content = self.create_opportunity_report(
                 backtest_report, 
-                actionable_opportunities_filtered, 
+                actionable_opportunities, 
                 market_info, 
-                upgraded_signals_filtered,
+                upgraded_signals,
                 debug_report_for_notification
             )
             self.send_notification(title, content)
         else:
-            print(f"[{self.get_current_time_str()}] 未发现RS > 80的实时信号。")
+            print(f"[{self.get_current_time_str()}] 未发现任何实时可操作信号。")
             if "未发现" not in backtest_report:
                 content = self.create_opportunity_report(backtest_report, [], market_info, [], debug_report_for_notification)
                 self.send_notification("OKX 12小时策略回测报告", content)
