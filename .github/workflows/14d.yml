@@ -35,4 +35,4 @@ jobs:
       - name: Run OKX Monitor Script
         env:
           SERVER_JIANG_KEY: ${{ secrets.SERVER_JIANG_KEY }}
-        run: python 14d.py
+        run: python 14d2.py
