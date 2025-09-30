@@ -28,18 +28,12 @@ class OKXMonitor:
         self.timezone = pytz.timezone('Asia/Shanghai')
         self.state_file = 'watchlist_state.json'
         self.CONCURRENCY_LIMIT = 10
-        self.STRICT_CONCURRENCY_LIMIT = 5 # For bursty requests like performance analysis
+        self.STRICT_CONCURRENCY_LIMIT = 5
         self.request_timestamps = []
         self.RATE_LIMIT_COUNT = 18
         self.RATE_LIMIT_WINDOW = 2000
 
-    # ... [The utility, data fetching, and indicator calculation methods from the previous version remain unchanged] ...
-    # ... [__init__, _create_session, get_current_time_str, _rate_limiter, fetch_with_retry, send_notification] ...
-    # ... [get_perpetual_instruments, get_kline_data, get_ticker_data] ...
-    # ... [_parse_klines_to_df, calculate_macd, calculate_atr, calculate_bollinger_bands, _get_change] ...
-    # ... [All scoring functions: calculate_rs_score, calculate_market_leadership_score, etc.] ...
-    # ... [Signal helper functions: find_last_cross_info, etc.] ...
-    
+    # ... [所有未改动的辅助函数、数据获取、指标计算、评分系统函数都保持不变] ...
     def _create_session(self):
         session = requests.Session()
         headers = {
@@ -126,9 +120,9 @@ class OKXMonitor:
 
     def fetch_all_data_for_instrument(self, inst_id):
         with ThreadPoolExecutor(max_workers=3) as executor:
-            future_h1 = executor.submit(self.get_kline_data, inst_id, '1H', 112 + 12) # Fetch extra for backtesting
+            future_h1 = executor.submit(self.get_kline_data, inst_id, '1H', 112 + 12)
             future_h4 = executor.submit(self.get_kline_data, inst_id, '4H', 105 + 4)
-            future_d1 = executor.submit(self.get_kline_data, inst_id, '1D', 102 + 1)
+            future_d1 = executor.submit(self.get_kline_data, inst_id, '1D', 102 + 2) # Fetch one extra daily candle for safety
             h1, h4, d1 = future_h1.result(), future_h4.result(), future_d1.result()
         if h1 and h4 and d1:
             return inst_id, {'h1': h1, 'h4': h4, 'd1': d1}
@@ -323,14 +317,19 @@ class OKXMonitor:
 
     def analyze_instrument(self, inst_id, snapshot_data, is_historical=False):
         try:
-            h1_df = self._parse_klines_to_df(snapshot_data['h1'])
-            h4_df = self._parse_klines_to_df(snapshot_data['h4'])
-            d1_df = self._parse_klines_to_df(snapshot_data['d1'])
+            h1_df_raw = self._parse_klines_to_df(snapshot_data['h1'])
+            h4_df_raw = self._parse_klines_to_df(snapshot_data['h4'])
+            d1_df_raw = self._parse_klines_to_df(snapshot_data['d1'])
             btc_d1_df = self._parse_klines_to_df(snapshot_data['btc']['d1'])
             eth_d1_df = self._parse_klines_to_df(snapshot_data['eth']['d1'])
 
-            if len(h1_df) < 24 or len(d1_df) < 60: return None
+            if len(h1_df_raw) < 24 or len(d1_df_raw) < 60: return None
             
+            # Use a copy to avoid SettingWithCopyWarning
+            h1_df = h1_df_raw.copy()
+            h4_df = h4_df_raw.copy()
+            d1_df = d1_df_raw.copy()
+
             daily_volume = h1_df['volCcyQuote'].iloc[-24:].sum()
             if daily_volume < self.MACD_VOLUME_THRESHOLD: return None
             
@@ -345,7 +344,6 @@ class OKXMonitor:
             leader_score = self.calculate_market_leadership_score(d1_df, btc_d1_df, eth_d1_df)
             result_base = {'inst_id': inst_id, 'rs_score': rs_score, 'leader_score': leader_score, 'volume': daily_volume}
             
-            # Add signal time and price for historical analysis
             if is_historical:
                 result_base['signalTime'] = h1_df['ts'].iloc[-1]
                 result_base['signalPrice'] = h1_df['close'].iloc[-1]
@@ -354,8 +352,9 @@ class OKXMonitor:
             if dea_cross_info:
                 idx = dea_cross_info['index']
                 current_ts = result_base.get('signalTime', time.time() * 1000)
-                result_base['trend_change_pct'] = ((d1_df['close'].iloc[-1] - d1_df['close'].iloc[idx]) / d1_df['close'].iloc[idx]) * 100
-                result_base['trend_duration_days'] = (current_ts / 1000 - d1_df['ts'].iloc[idx]/1000) / (3600*24)
+                if idx < len(d1_df): # Ensure index is valid
+                    result_base['trend_change_pct'] = ((d1_df['close'].iloc[-1] - d1_df['close'].iloc[idx]) / d1_df['close'].iloc[idx]) * 100
+                    result_base['trend_duration_days'] = (current_ts / 1000 - d1_df['ts'].iloc[idx]/1000) / (3600*24)
             
             d1_last, d1_prev = d1_macd.iloc[-1], d1_macd.iloc[-2]
             h4_last, h4_prev = h4_macd.iloc[-1], h4_macd.iloc[-2]
@@ -396,7 +395,7 @@ class OKXMonitor:
                     base_opp = {**result_base, 'type': 'Long Pullback', 'strategy_level': '1H回调'}
                 if base_opp:
                     base_opp['quality_score'] = self.calculate_continuation_quality_score(base_opp, d1_df, h4_df, d1_macd, h4_macd)
-                    if dea_cross_info and dea_cross_info['type'] == 'bullish':
+                    if dea_cross_info and dea_cross_info['type'] == 'bullish' and dea_cross_info['index'] < len(d1_df):
                         klines_since_cross = d1_df.iloc[dea_cross_info['index']:]
                         price_at_zero_cross = klines_since_cross['close'].iloc[0]
                         peak_price = klines_since_cross['high'].max()
@@ -428,7 +427,6 @@ class OKXMonitor:
             return None
 
     def get_strategy_explanation(self):
-        # ... [Same as previous version] ...
         return """
 ---
 ### **策略说明**
@@ -459,7 +457,6 @@ class OKXMonitor:
         return f"{volume:.2f}"
     
     def get_market_sentiment(self, btc_data):
-        # ... [Same as previous version] ...
         klines = {
             '1D': self._parse_klines_to_df(btc_data['d1'])['close'],
             '4H': self._parse_klines_to_df(btc_data['h4'])['close'],
@@ -521,9 +518,8 @@ class OKXMonitor:
         time_since_signal_ms = now - signal['signalTime']
         minutes_since_signal = time_since_signal_ms / (1000 * 60)
         
-        # Fetch 5-minute candles to cover the period since the signal
-        candles_to_fetch = min(300, int(minutes_since_signal / 5) + 1)
-        if candles_to_fetch <= 0:
+        candles_to_fetch = min(300, int(minutes_since_signal / 5) + 2)
+        if candles_to_fetch <= 1:
             return {'maxMovePct': 0, 'timeToPeak': '0m'}
 
         klines_5m_raw = self.get_kline_data(signal['inst_id'], '5m', candles_to_fetch)
@@ -538,10 +534,12 @@ class OKXMonitor:
 
         peak_price, peak_time = 0, 0
         if 'Long' in signal['type']:
+            if relevant_klines['high'].empty: return {'maxMovePct': 0, 'timeToPeak': '0m'}
             peak_price = relevant_klines['high'].max()
             peak_candle = relevant_klines.loc[relevant_klines['high'].idxmax()]
             peak_time = peak_candle['ts']
         else: # Short
+            if relevant_klines['low'].empty: return {'maxMovePct': 0, 'timeToPeak': '0m'}
             peak_price = relevant_klines['low'].min()
             peak_candle = relevant_klines.loc[relevant_klines['low'].idxmin()]
             peak_time = peak_candle['ts']
@@ -556,10 +554,7 @@ class OKXMonitor:
             return "### 📊 过去12小时信号回测 📊\n\n在过去12小时内未发现符合策略的交易信号。\n"
 
         report = "### 📊 过去12小时信号回测 📊\n"
-        
         type_map = { 'Long Trend': '🚀 多头启动', 'Long Phoenix': '🔥 凤凰信号', 'Long Continuation': '➡️ 多头延续', 'Long Pullback': '🐂 多头回调', 'Short Trend': '📉 空头启动', 'Short Continuation': '↘️ 空头延续', 'Short Pullback': '🐻 空头回调' }
-
-        # Group signals by instrument
         grouped_signals = {}
         for sig in historical_signals:
             inst_name = sig['inst_id'].replace('-USDT-SWAP', '')
@@ -567,7 +562,6 @@ class OKXMonitor:
                 grouped_signals[inst_name] = []
             grouped_signals[inst_name].append(sig)
 
-        # Sort groups by the most recent signal time within the group
         sorted_groups = sorted(grouped_signals.items(), key=lambda item: max(s['signalTime'] for s in item[1]), reverse=True)
 
         for inst_name, signals in sorted_groups:
@@ -575,7 +569,7 @@ class OKXMonitor:
             report += "| 有效性 | 领袖分 | 质量分 | 信号时间 | 类型 | RS分 | 信号价 | 最大涨/跌幅 | 达峰耗时 |\n"
             report += "|:---:|:---:|:---:|:---|:---|:---:|:---:|:---:|:---:|\n"
             
-            signals.sort(key=lambda x: x['signalTime'], reverse=True) # Sort signals for each instrument
+            signals.sort(key=lambda x: x['signalTime'], reverse=True)
             
             for sig in signals:
                 perf = sig.get('performance', {})
@@ -593,9 +587,9 @@ class OKXMonitor:
                 sig_time = datetime.fromtimestamp(sig['signalTime']/1000, self.timezone).strftime('%H:%M')
                 time_ago = f"({sig['hoursAgo']}H前)"
                 
-                leader_score = sig.get('leader_score') or 'N/A'
-                quality_score = sig.get('quality_score') or 'N/A'
-                rs_score = sig.get('rs_score') or 'N/A'
+                leader_score = sig.get('leader_score') if sig.get('leader_score') is not None else 'N/A'
+                quality_score = sig.get('quality_score') if sig.get('quality_score') is not None else 'N/A'
+                rs_score = sig.get('rs_score') if sig.get('rs_score') is not None else 'N/A'
 
                 report += f"| {is_effective} | {leader_score} | {quality_score} | {sig_time} {time_ago} | {type_map.get(sig['type'], sig['type'])} | {rs_score} | {sig['signalPrice']:.4g} | {move_str} | {perf.get('timeToPeak', 'N/A')} |\n"
                 
@@ -621,9 +615,16 @@ class OKXMonitor:
                 vol_str = self.format_volume(opp['volume'])
                 change_24h = opp.get('price_change_24h', 0)
                 change_24h_str = f"📈 {change_24h:.2f}%" if change_24h > 0 else f"📉 {change_24h:.2f}%"
-                leader_score = f"**{opp.get('leader_score', 'N/A')}**" if opp.get('leader_score', 0) >= 80 else str(opp.get('leader_score', 'N/A'))
-                quality_score = f"**{opp.get('quality_score', 'N/A')}**" if opp.get('quality_score', 0) >= 80 else str(opp.get('quality_score', 'N/A'))
-                rs_score = f"**{opp.get('rs_score', 'N/A')}**" if opp.get('rs_score', 0) >= 80 else str(opp.get('rs_score', 'N/A'))
+                
+                leader_score_val = opp.get('leader_score')
+                leader_score = f"**{leader_score_val}**" if leader_score_val is not None and leader_score_val >= 80 else str(leader_score_val if leader_score_val is not None else 'N/A')
+                
+                quality_score_val = opp.get('quality_score')
+                quality_score = f"**{quality_score_val}**" if quality_score_val is not None and quality_score_val >= 80 else str(quality_score_val if quality_score_val is not None else 'N/A')
+
+                rs_score_val = opp.get('rs_score')
+                rs_score = f"**{rs_score_val}**" if rs_score_val is not None and rs_score_val >= 80 else str(rs_score_val if rs_score_val is not None else 'N/A')
+                
                 trend_change = opp.get('trend_change_pct', 0)
                 trend_change_str = f"📈 {trend_change:.1f}%" if trend_change > 0 else (f"📉 {trend_change:.1f}%" if trend_change < 0 else "N/A")
                 trend_days = opp.get('trend_duration_days', 0)
@@ -642,6 +643,32 @@ class OKXMonitor:
         content += self.get_strategy_explanation()
         return content
 
+    # --- NEW: Helper function for correct historical data slicing ---
+    def _get_historical_snapshot(self, i, full_data_df, btc_full_df, eth_full_df):
+        # This function creates a data snapshot as it existed 'i' hours ago.
+        
+        # 1. Get the target 1H candle and its timestamp
+        if len(full_data_df['h1']) <= i: return None
+        h1_snapshot_df = full_data_df['h1'].iloc[:-i]
+        last_h1_candle_ts = h1_snapshot_df['ts'].iloc[-1]
+        
+        # 2. Filter H4, D1 candles based on the target timestamp
+        h4_snapshot_df = full_data_df['h4'][full_data_df['h4']['ts'] <= last_h1_candle_ts]
+        d1_snapshot_df = full_data_df['d1'][full_data_df['d1']['ts'] <= last_h1_candle_ts]
+        btc_d1_snapshot_df = btc_full_df['d1'][btc_full_df['d1']['ts'] <= last_h1_candle_ts]
+        eth_d1_snapshot_df = eth_full_df['d1'][eth_full_df['d1']['ts'] <= last_h1_candle_ts]
+
+        if h1_snapshot_df.empty or h4_snapshot_df.empty or d1_snapshot_df.empty or btc_d1_snapshot_df.empty or eth_d1_snapshot_df.empty:
+            return None
+
+        return {
+            'h1': h1_snapshot_df.to_dict('records'),
+            'h4': h4_snapshot_df.to_dict('records'),
+            'd1': d1_snapshot_df.to_dict('records'),
+            'btc': {'d1': btc_d1_snapshot_df.to_dict('records')},
+            'eth': {'d1': eth_d1_snapshot_df.to_dict('records')}
+        }
+
     def run_backtest(self, all_instruments_data):
         print(f"[{self.get_current_time_str()}] === 开始执行12小时信号回测 ===")
         historical_signals = []
@@ -653,19 +680,24 @@ class OKXMonitor:
             print("BTC或ETH数据不足，无法进行回测。")
             return ""
 
-        for i in range(1, 13): # For the last 12 hours
-            print(f"\r正在回溯过去第 {i}/12 小时的信号...", end="")
-            for inst_id, data in all_instruments_data.items():
-                if not data['h1'] or len(data['h1']) <= i: continue
+        # Convert all data to DataFrame once for efficient slicing
+        all_instruments_df = {
+            inst: {
+                'h1': self._parse_klines_to_df(data['h1']),
+                'h4': self._parse_klines_to_df(data['h4']),
+                'd1': self._parse_klines_to_df(data['d1'])
+            } for inst, data in all_instruments_data.items()
+        }
+        btc_full_df = all_instruments_df.get('BTC-USDT-SWAP')
+        eth_full_df = all_instruments_df.get('ETH-USDT-SWAP')
 
-                # Create historical data snapshot
-                historical_snapshot = {
-                    'h1': data['h1'][:-i],
-                    'h4': data['h4'][:-floor(i/4)] if len(data['h4']) > floor(i/4) else [],
-                    'd1': data['d1'][:-floor(i/24)] if len(data['d1']) > floor(i/24) else [],
-                    'btc': {'d1': btc_full_history['d1'][:-floor(i/24)] if len(btc_full_history['d1']) > floor(i/24) else []},
-                    'eth': {'d1': eth_full_history['d1'][:-floor(i/24)] if len(eth_full_history['d1']) > floor(i/24) else []}
-                }
+        for i in range(1, 13):
+            print(f"\r正在回溯过去第 {i}/12 小时的信号...", end="")
+            for inst_id, data_df in all_instruments_df.items():
+                
+                # <<< CRITICAL FIX: Use the new snapshot function >>>
+                historical_snapshot = self._get_historical_snapshot(i, data_df, btc_full_df, eth_full_df)
+                if not historical_snapshot: continue
                 
                 signal = self.analyze_instrument(inst_id, historical_snapshot, is_historical=True)
 
@@ -682,12 +714,12 @@ class OKXMonitor:
             print(f"[{self.get_current_time_str()}] 正在并发分析 {len(historical_signals)} 个历史信号的表现...")
             with ThreadPoolExecutor(max_workers=self.STRICT_CONCURRENCY_LIMIT) as executor:
                 future_to_signal = {executor.submit(self.analyze_signal_performance, sig): sig for sig in historical_signals}
-                for i, future in enumerate(as_completed(future_to_signal)):
+                for j, future in enumerate(as_completed(future_to_signal)):
                     signal = future_to_signal[future]
                     try:
                         performance_data = future.result()
                         signal['performance'] = performance_data
-                        print(f"\r信号表现分析进度: {i+1}/{len(historical_signals)}", end="")
+                        print(f"\r信号表现分析进度: {j+1}/{len(historical_signals)}", end="")
                     except Exception as exc:
                         print(f'{signal["inst_id"]} 生成表现时出错: {exc}')
             print(f"\n[{self.get_current_time_str()}] 历史信号表现分析完成。")
@@ -714,7 +746,6 @@ class OKXMonitor:
                 print(f"\r数据获取进度: {i+1}/{len(instruments)}", end="")
         print(f"\n[{self.get_current_time_str()}] 数据获取完毕，耗时 {time.time() - start_time:.2f}秒. 有效数据: {len(all_instruments_data)}个币种。")
 
-        # <<< NEW: Run backtest first >>>
         backtest_report = self.run_backtest(all_instruments_data)
         
         print(f"[{self.get_current_time_str()}] === 开始执行当前信号扫描 ===")
@@ -728,11 +759,10 @@ class OKXMonitor:
         
         all_opportunities = []
         with ThreadPoolExecutor(max_workers=os.cpu_count() or 4) as executor:
-            # Prepare current data snapshots
             current_snapshots = {}
-            btc_d1, eth_d1 = all_instruments_data['BTC-USDT-SWAP']['d1'], all_instruments_data['ETH-USDT-SWAP']['d1']
+            btc_full, eth_full = all_instruments_data['BTC-USDT-SWAP'], all_instruments_data['ETH-USDT-SWAP']
             for inst_id, data in all_instruments_data.items():
-                current_snapshots[inst_id] = {**data, 'btc': {'d1': btc_d1}, 'eth': {'d1': eth_d1}}
+                current_snapshots[inst_id] = {**data, 'btc': btc_full, 'eth': eth_full}
 
             futures = [executor.submit(self.analyze_instrument, inst_id, snap, is_historical=False) for inst_id, snap in current_snapshots.items()]
             for i, future in enumerate(as_completed(futures)):
@@ -777,10 +807,12 @@ class OKXMonitor:
                 self.send_notification(title, content)
             else:
                 print(f"[{self.get_current_time_str()}] 仅发现 {len(all_opportunities)} 个观察信号，不发送通知。")
+                if "未发现" not in backtest_report:
+                    self.send_notification("OKX 12小时策略回测报告", backtest_report + self.get_strategy_explanation())
+
         else:
             print(f"[{self.get_current_time_str()}] 本次未发现任何符合条件的实时信号。")
-            self.save_watchlist_state({}) # Clear watchlist if no current signals are found
-            # Still send a notification with the backtest results if any were found
+            self.save_watchlist_state({})
             if "未发现" not in backtest_report:
                 self.send_notification("OKX 12小时策略回测报告", backtest_report + self.get_strategy_explanation())
 
