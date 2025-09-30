@@ -32,9 +32,8 @@ class OKXMonitor:
         self.request_timestamps = []
         self.RATE_LIMIT_COUNT = 18
         self.RATE_LIMIT_WINDOW = 2000
-        self.debug_logs = [] # 用于存储调试日志
+        self.debug_logs = []
 
-    # ... [所有未改动的辅助函数、数据获取、指标计算、评分系统函数都保持不变] ...
     def _create_session(self):
         session = requests.Session()
         headers = {
@@ -93,8 +92,10 @@ class OKXMonitor:
                 print(f"[{self.get_current_time_str()}] 通知发送成功: {title}")
             else:
                 print(f"[{self.get_current_time_str()}] 通知发送失败: {result}")
-        except Exception as e:
+        except requests.exceptions.RequestException as e:
             print(f"[{self.get_current_time_str()}] 发送通知时出错: {e}")
+            if e.response:
+                print(f"[{self.get_current_time_str()}] 响应内容: {e.response.text}")
     
     def get_perpetual_instruments(self):
         data = self.fetch_with_retry(f"{self.base_url}/api/v5/public/instruments", {'instType': 'SWAP'})
@@ -316,7 +317,6 @@ class OKXMonitor:
             return {'is_fresh': False, 'reason': f"穿越0轴后价格波动过大(>{self.ATR_MULTIPLIER}倍ATR)"}
         return {'is_fresh': True, 'reason': '穿越0轴且新鲜'}
 
-    # --- NEW: Helper for debug logging ---
     def _log_debug(self, debug_info, category, name, cond, val_obj, res):
         if category not in debug_info['checks']:
             debug_info['checks'][category] = {'final_result': False, 'steps': []}
@@ -350,7 +350,8 @@ class OKXMonitor:
             
             daily_volume = h1_df['volCcyQuote'].iloc[-24:].sum()
             vol_check = daily_volume >= self.MACD_VOLUME_THRESHOLD
-            self._log_debug(debug_info, '基础过滤', '24H成交额', f"> {self.MACD_VOLUME_THRESHOLD/1e6:.0f}M", f"{daily_volume/1e6:.2f}M", vol_check)
+            if not is_historical:
+                self._log_debug(debug_info, '基础过滤', '24H成交额', f"> {self.MACD_VOLUME_THRESHOLD/1e6:.0f}M", f"{daily_volume/1e6:.2f}M", vol_check)
             if not vol_check:
                 if not is_historical: self.debug_logs.append(debug_info)
                 return None
@@ -364,7 +365,8 @@ class OKXMonitor:
             
             rs_score = self.calculate_rs_score(d1_df, btc_d1_df, eth_d1_df)
             leader_score = self.calculate_market_leadership_score(d1_df, btc_d1_df, eth_d1_df)
-            debug_info.update({'leader_score': leader_score, 'rs_score': rs_score})
+            if not is_historical:
+                debug_info.update({'leader_score': leader_score, 'rs_score': rs_score})
 
             result_base = {'inst_id': inst_id, 'rs_score': rs_score, 'leader_score': leader_score, 'volume': daily_volume}
             
@@ -383,59 +385,58 @@ class OKXMonitor:
             h4_last, h4_prev = h4_macd.iloc[-1], h4_macd.iloc[-2]
             h1_last, h1_prev = h1_macd.iloc[-1], h1_macd.iloc[-2]
             
-            # --- Start Logging Checks ---
-            
-            # 1. Trend Signals
             form_A_long_info = self.find_last_dea_zero_cross_info(d1_macd, self.MAX_CANDLES_AGO)
             form_A_long = form_A_long_info and form_A_long_info['type'] == 'bullish'
-            self._log_debug(debug_info, '多头启动', '形态A(近期穿0轴)', 'true', form_A_long, form_A_long)
             form_B_long_info = self.check_freshness_since_zero_cross(d1_df, d1_macd, 'bullish', d1_atr)
-            self._log_debug(debug_info, '多头启动', '形态B(穿轴后新鲜)', 'true', form_B_long_info, form_B_long_info['is_fresh'])
             momentum_C_long = d1_last['macd'] > d1_last['signal'] and d1_last['histogram'] > d1_prev['histogram']
-            self._log_debug(debug_info, '多头启动', '动能C(金叉+增强)', 'true', momentum_C_long, momentum_C_long)
             
+            if not is_historical:
+                self._log_debug(debug_info, '多头启动', '形态A(近期穿0轴)', 'true', form_A_long, form_A_long)
+                self._log_debug(debug_info, '多头启动', '形态B(穿轴后新鲜)', 'true', form_B_long_info, form_B_long_info['is_fresh'])
+                self._log_debug(debug_info, '多头启动', '动能C(金叉+增强)', 'true', momentum_C_long, momentum_C_long)
+
             if (form_A_long or form_B_long_info['is_fresh']) and momentum_C_long:
                 h4_ok_long = h4_last['macd'] > h4_last['signal'] and h4_last['histogram'] > h4_prev['histogram']
-                self._log_debug(debug_info, '多头启动', '4H 确认', '金叉+增强', h4_ok_long, h4_ok_long)
-                debug_info['checks']['多头启动']['final_result'] = 'Long Trend' if h4_ok_long else False
-                if not is_historical: self.debug_logs.append(debug_info)
+                if not is_historical:
+                    self._log_debug(debug_info, '多头启动', '4H 确认', '金叉+增强', h4_ok_long, h4_ok_long)
+                    debug_info['checks']['多头启动']['final_result'] = 'Long Trend' if h4_ok_long else False
                 
                 if h4_ok_long:
                     metrics = { 'volume': daily_volume, 'avg_volume': d1_df['volCcyQuote'].iloc[-20:].mean(), 'd1_hist': d1_last['histogram'], 'd1_prev_hist': d1_prev['histogram'], 'h4_hist': h4_last['histogram'], 'price': d1_df['close'].iloc[-1], 'ema60': d1_df['close'].ewm(span=60, adjust=False).mean().iloc[-1], 'bandwidth': self.calculate_bollinger_bands(d1_df).get('bandwidth', 1) }
                     score = self.calculate_startup_quality_score(result_base, metrics)
+                    if not is_historical: self.debug_logs.append(debug_info)
                     return {**result_base, 'type': 'Long Trend', 'quality_score': score}
                 else:
+                    if not is_historical: self.debug_logs.append(debug_info)
                     return {**result_base, 'type': 'Long Watchlist', 'quality_score': None}
 
-            # ... (Similar logging for Short Trend)
-            
-            # 2. Continuation Signals
             is_stable_bull = d1_last['macd'] > 0 and d1_last['signal'] > 0 and (d1_macd['signal'].iloc[-5:] > 0).all()
-            self._log_debug(debug_info, '顺势多头', 'D1 强趋势', '0轴上稳定', is_stable_bull, is_stable_bull)
+            if not is_historical: self._log_debug(debug_info, '顺势多头', 'D1 强趋势', '0轴上稳定', is_stable_bull, is_stable_bull)
             if is_stable_bull:
                 base_opp = None
                 h4_fresh_info = self.get_signal_freshness_info(h4_df, h4_macd, 'golden', h4_atr)
-                self._log_debug(debug_info, '顺势多头', '4H 新鲜金叉', 'true', h4_fresh_info, h4_fresh_info['is_fresh'])
                 is_h1_golden_cross = h1_last['macd'] > h1_last['signal'] and h1_prev['macd'] <= h1_prev['signal']
-                self._log_debug(debug_info, '顺势多头', '1H 刚刚金叉', 'true', is_h1_golden_cross, is_h1_golden_cross)
+                if not is_historical:
+                    self._log_debug(debug_info, '顺势多头', '4H 新鲜金叉', 'true', h4_fresh_info, h4_fresh_info['is_fresh'])
+                    self._log_debug(debug_info, '顺势多头', '1H 刚刚金叉', 'true', is_h1_golden_cross, is_h1_golden_cross)
                 
                 if h4_fresh_info['is_fresh'] and is_h1_golden_cross:
                     base_opp = {**result_base, 'type': 'Long Continuation'}
                 
                 is_h4_hist_rising = h4_last['histogram'] > h4_prev['histogram']
-                self._log_debug(debug_info, '顺势多头', '4H 回调安全', '动能衰竭/反转', is_h4_hist_rising, is_h4_hist_rising)
                 is_h1_hist_rising = h1_last['histogram'] > h1_prev['histogram']
-                self._log_debug(debug_info, '顺势多头', '1H 回调动能', '增强', is_h1_hist_rising, is_h1_hist_rising)
+                if not is_historical:
+                    self._log_debug(debug_info, '顺势多头', '4H 回调安全', '动能衰竭/反转', is_h4_hist_rising, is_h4_hist_rising)
+                    self._log_debug(debug_info, '顺势多头', '1H 回调动能', '增强', is_h1_hist_rising, is_h1_hist_rising)
 
                 if not base_opp and is_h1_golden_cross and is_h4_hist_rising and is_h1_hist_rising:
                     base_opp = {**result_base, 'type': 'Long Pullback'}
                 
                 if base_opp:
-                    debug_info['checks']['顺势多头']['final_result'] = base_opp['type']
+                    if not is_historical: debug_info['checks']['顺势多头']['final_result'] = base_opp['type']
                     base_opp['quality_score'] = self.calculate_continuation_quality_score(base_opp, d1_df, h4_df, d1_macd, h4_macd)
                     
                     if dea_cross_info and dea_cross_info['type'] == 'bullish' and dea_cross_info['index'] < len(d1_df):
-                        # ... (Phoenix signal logic with logging)
                         klines_since_cross = d1_df.iloc[dea_cross_info['index']:]
                         price_at_zero_cross = klines_since_cross['close'].iloc[0]
                         peak_price = klines_since_cross['high'].max()
@@ -443,31 +444,29 @@ class OKXMonitor:
                         current_drawdown = peak_price - d1_df['close'].iloc[-1]
                         current_retracement_pct = (current_drawdown / initial_rally_range) * 100 if initial_rally_range > 0 else 0
                         is_deep_retracement = current_retracement_pct > 70
-                        self._log_debug(debug_info, '凤凰信号', '核心前提: 深度回撤', '> 70%', f"{current_retracement_pct:.1f}%", is_deep_retracement)
+                        if not is_historical: self._log_debug(debug_info, '凤凰信号', '核心前提: 深度回撤', '> 70%', f"{current_retracement_pct:.1f}%", is_deep_retracement)
+                        
                         if is_deep_retracement:
                             initial_rally_pct = ((peak_price - price_at_zero_cross) / price_at_zero_cross) * 100
                             has_strength = initial_rally_pct > 15
-                            self._log_debug(debug_info, '凤凰信号', '健康检查1: 趋势强度', '> 15%', f"{initial_rally_pct:.1f}%", has_strength)
-                            
                             bands_history = d1_df['close'].rolling(20).std() / d1_df['close'].rolling(20).mean()
                             low_vol_threshold = bands_history.quantile(0.3)
                             current_bw = self.calculate_bollinger_bands(d1_df).get('bandwidth', 1)
                             is_vol_low = current_bw < low_vol_threshold
-                            self._log_debug(debug_info, '凤凰信号', '健康检查2: 波动收缩', f"< {low_vol_threshold:.4f}", f"{current_bw:.4f}", is_vol_low)
+                            if not is_historical:
+                                self._log_debug(debug_info, '凤凰信号', '健康检查1: 趋势强度', '> 15%', f"{initial_rally_pct:.1f}%", has_strength)
+                                self._log_debug(debug_info, '凤凰信号', '健康检查2: 波动收缩', f"< {low_vol_threshold:.4f}", f"{current_bw:.4f}", is_vol_low)
 
                             if has_strength and is_vol_low:
                                 base_opp['type'] = 'Long Phoenix'
-                                debug_info['checks']['凤凰信号']['final_result'] = base_opp['type']
+                                if not is_historical: debug_info['checks']['凤凰信号']['final_result'] = base_opp['type']
                     
                     if not is_historical: self.debug_logs.append(debug_info)
                     return base_opp
 
-            # ... (Similar logic and logging for Short Continuation)
-            
             if not is_historical: self.debug_logs.append(debug_info)
             return None
-        except Exception as e:
-            # print(f"Error in analyze_instrument for {inst_id}: {e}")
+        except Exception:
             if not is_historical: self.debug_logs.append(debug_info)
             return None
 
@@ -594,7 +593,6 @@ class OKXMonitor:
             with open(self.state_file, 'w') as f: json.dump(watchlist, f)
         except Exception as e: print(f"保存状态文件失败: {e}")
 
-    # --- Backtesting and Reporting ---
     def analyze_signal_performance(self, signal):
         now = time.time() * 1000
         time_since_signal_ms = now - signal['signalTime']
@@ -676,27 +674,23 @@ class OKXMonitor:
                 report += f"| {is_effective} | {leader_score} | {quality_score} | {sig_time} {time_ago} | {type_map.get(sig['type'], sig['type'])} | {rs_score} | {sig['signalPrice']:.4g} | {move_str} | {perf.get('timeToPeak', 'N/A')} |\n"
                 
         return report
-        
-    def create_debug_report(self):
-        if not self.debug_logs:
-            return ""
 
-        report = "\n---\n### **策略调试日志**\n"
-        
-        # Sort by leader score, descending. Handle None values.
+    def create_debug_report_md(self):
+        if not self.debug_logs: return ""
+
+        report = "\n---\n### **策略调试日志 (领袖分Top 20)**\n"
         self.debug_logs.sort(key=lambda x: x.get('leader_score') or -1, reverse=True)
-        
         type_map = {'Long Trend': '🚀', 'Long Phoenix': '🔥', 'Long Continuation': '➡️', 'Long Pullback': '🐂', 'Short Trend': '📉', 'Short Continuation': '↘️', 'Short Pullback': '🐻'}
 
-        report += "| 交易对 | 领袖分 | RS分 | 启动 | 延续/回调 | 凤凰 | 详情 |\n"
-        report += "|:---|:---:|:---:|:---:|:---:|:---:|:---:|\n"
+        report += "| 交易对 | 领袖分 | RS分 | 启动 | 延续/回调 | 凤凰 |\n"
+        report += "|:---|:---:|:---:|:---:|:---:|:---:|\n"
 
-        for log in self.debug_logs:
+        for log in self.debug_logs[:20]: # Limit to top 20 to prevent notification failure
             inst_name = log['inst_id'].replace('-USDT-SWAP', '')
-            leader_score = log.get('leader_score')
-            leader_str = f"{leader_score}" if leader_score is not None else 'N/A'
-            rs_score = log.get('rs_score')
-            rs_str = f"{rs_score}" if rs_score is not None else 'N/A'
+            leader_score_val = log.get('leader_score')
+            leader_str = f"{leader_score_val:.0f}" if leader_score_val is not None else 'N/A'
+            rs_score_val = log.get('rs_score')
+            rs_str = f"{rs_score_val:.0f}" if rs_score_val is not None else 'N/A'
 
             trend_res = log['checks'].get('多头启动', {}).get('final_result') or log['checks'].get('空头启动', {}).get('final_result')
             trend_icon = type_map.get(trend_res, '➖')
@@ -706,15 +700,12 @@ class OKXMonitor:
             
             phoenix_res = log['checks'].get('凤凰信号', {}).get('final_result')
             phoenix_icon = type_map.get(phoenix_res, '➖')
-
-            details = ""
-            for category, data in log['checks'].items():
-                details += f"**{category}**:<br>"
-                for step in data['steps']:
-                    details += f"&nbsp;&nbsp;- {step['name']}: {step['val']} -> {step['res']}<br>"
             
-            report += f"| **{inst_name}** | {leader_str} | {rs_str} | {trend_icon} | {cont_icon} | {phoenix_icon} | <details><summary>查看</summary>{details}</details> |\n"
-
+            report += f"| **{inst_name}** | {leader_str} | {rs_str} | {trend_icon} | {cont_icon} | {phoenix_icon} |\n"
+        
+        if len(self.debug_logs) > 20:
+            report += "| ... | ... | ... | ... | ... | ... |\n"
+            
         return report
 
     def create_opportunity_report(self, backtest_report, opportunities, market_info, upgraded_signals, debug_report):
@@ -739,13 +730,13 @@ class OKXMonitor:
                 change_24h_str = f"📈 {change_24h:.2f}%" if change_24h > 0 else f"📉 {change_24h:.2f}%"
                 
                 leader_score_val = opp.get('leader_score')
-                leader_score = f"**{leader_score_val}**" if leader_score_val is not None and leader_score_val >= 80 else str(leader_score_val if leader_score_val is not None else 'N/A')
+                leader_score = f"**{leader_score_val:.0f}**" if leader_score_val is not None and leader_score_val >= 80 else str(f"{leader_score_val:.0f}" if leader_score_val is not None else 'N/A')
                 
                 quality_score_val = opp.get('quality_score')
-                quality_score = f"**{quality_score_val}**" if quality_score_val is not None and quality_score_val >= 80 else str(quality_score_val if quality_score_val is not None else 'N/A')
+                quality_score = f"**{quality_score_val:.0f}**" if quality_score_val is not None and quality_score_val >= 80 else str(f"{quality_score_val:.0f}" if quality_score_val is not None else 'N/A')
 
                 rs_score_val = opp.get('rs_score')
-                rs_score = f"**{rs_score_val}**" if rs_score_val is not None and rs_score_val >= 80 else str(rs_score_val if rs_score_val is not None else 'N/A')
+                rs_score = f"**{rs_score_val:.0f}**" if rs_score_val is not None and rs_score_val >= 80 else str(f"{rs_score_val:.0f}" if rs_score_val is not None else 'N/A')
                 
                 trend_change = opp.get('trend_change_pct', 0)
                 trend_change_str = f"📈 {trend_change:.1f}%" if trend_change > 0 else (f"📉 {trend_change:.1f}%" if trend_change < 0 else "N/A")
@@ -759,7 +750,6 @@ class OKXMonitor:
         upgraded_ids = {s['inst_id'] for s in upgraded_signals}
         new_actionable = [opp for opp in opportunities if opp['inst_id'] not in upgraded_ids]
         
-        # Only add tables if there is content for them after filtering
         if upgraded_signals:
             content += generate_table('✨ 信号升级 ✨ (RS > 80)', upgraded_signals)
         if new_actionable:
@@ -769,7 +759,7 @@ class OKXMonitor:
             content += "\n在当前时间点，未发现RS评分高于80的实时交易机会。\n"
 
         content += self.get_strategy_explanation()
-        content += debug_report # Append the debug log at the end
+        content += debug_report
         return content
 
     def _get_historical_snapshot(self, i, full_data_df, btc_full_df, eth_full_df):
@@ -848,12 +838,11 @@ class OKXMonitor:
 
         return self.create_backtest_report(historical_signals)
 
-    # --- 主运行函数 ---
     def run(self):
         start_time = time.time()
         print(f"[{self.get_current_time_str()}] === 开始执行监控任务 ===")
         
-        self.debug_logs = [] # 重置调试日志
+        self.debug_logs = []
         previous_watchlist = self.load_watchlist_state()
         instruments = self.get_perpetual_instruments()
         if not instruments: return
@@ -892,8 +881,7 @@ class OKXMonitor:
                 result = future.result()
                 if result:
                     all_opportunities.append(result)
-        print(f"\n[{self.get_current_time_str()}] 信号分析完毕，发现 {len(all_opportunities)} 个潜在信号。")
-
+        
         actionable_opportunities = []
         upgraded_signals = []
         new_watchlist = {}
@@ -919,7 +907,6 @@ class OKXMonitor:
         
         self.save_watchlist_state(new_watchlist)
         
-        # --- NEW: Filter signals based on RS Score > 80 ---
         initial_actionable_count = len(actionable_opportunities)
         actionable_opportunities_filtered = [
             opp for opp in actionable_opportunities 
@@ -931,10 +918,8 @@ class OKXMonitor:
         ]
         print(f"[{self.get_current_time_str()}] 初始发现 {initial_actionable_count} 个可操作信号, 经过RS > 80筛选后剩余 {len(actionable_opportunities_filtered)} 个。")
 
-        # --- Generate final reports ---
-        debug_report = self.create_debug_report()
+        debug_report_for_notification = self.create_debug_report_md()
 
-        # Decide whether to send a notification
         if actionable_opportunities_filtered:
             title = ""
             new_actionable_count = len(actionable_opportunities_filtered) - len(upgraded_signals_filtered)
@@ -950,14 +935,13 @@ class OKXMonitor:
                 actionable_opportunities_filtered, 
                 market_info, 
                 upgraded_signals_filtered,
-                debug_report
+                debug_report_for_notification
             )
             self.send_notification(title, content)
         else:
             print(f"[{self.get_current_time_str()}] 未发现RS > 80的实时信号。")
             if "未发现" not in backtest_report:
-                # If there are no live signals but there is a backtest result, send it
-                content = self.create_opportunity_report(backtest_report, [], market_info, [], debug_report)
+                content = self.create_opportunity_report(backtest_report, [], market_info, [], debug_report_for_notification)
                 self.send_notification("OKX 12小时策略回测报告", content)
 
         end_time = time.time()
