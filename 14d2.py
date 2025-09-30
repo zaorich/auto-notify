@@ -22,6 +22,10 @@ class OKXMonitor:
         self.MACD_VOLUME_THRESHOLD = 10_000_000
         self.ATR_MULTIPLIER = 2.0
         self.MAX_CANDLES_AGO = 5
+
+        # --- <<< 新增开关 >>> ---
+        # 设为True，则在通知末尾附加详细的策略说明。默认为False，保持通知简洁。
+        self.SEND_STRATEGY_EXPLANATION = False
         
         # --- 系统配置 ---
         self.session = self._create_session()
@@ -674,7 +678,7 @@ class OKXMonitor:
                 report += f"| {is_effective} | {leader_score} | {quality_score} | {sig_time} {time_ago} | {type_map.get(sig['type'], sig['type'])} | {rs_score} | {sig['signalPrice']:.4g} | {move_str} | {perf.get('timeToPeak', 'N/A')} |\n"
                 
         return report
-
+        
     def create_debug_report_md(self):
         if not self.debug_logs: return ""
 
@@ -758,7 +762,10 @@ class OKXMonitor:
         if not upgraded_signals and not new_actionable:
             content += "\n在当前时间点，未发现RS评分高于80的实时交易机会。\n"
 
-        content += self.get_strategy_explanation()
+        # <<< 使用开关控制策略说明的附加 >>>
+        if self.SEND_STRATEGY_EXPLANATION:
+            content += self.get_strategy_explanation()
+            
         content += debug_report
         return content
 
