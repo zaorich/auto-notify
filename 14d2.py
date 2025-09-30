@@ -82,8 +82,8 @@ class OKXMonitor:
             print(f"标题: {title}\n内容:\n{content}")
             return
         
-        # Markdown格式化
-        desp = content.replace('\n', '\n\n')
+        # **关键修复**：直接使用content作为desp，不再替换换行符，以保证Markdown表格格式正确
+        desp = content
         
         try:
             url = f"https://sctapi.ftqq.com/{self.server_jiang_key}.send"
@@ -413,7 +413,8 @@ class OKXMonitor:
             h1_last, h1_prev = h1_macd.iloc[-1], h1_macd.iloc[-2]
 
             # 1. 启动信号检查 (Trend)
-            form_A_long = self.find_last_dea_zero_cross_info(d1_macd, self.MAX_CANDLES_AGO) == 'bullish'
+            form_A_long_cross_info = self.find_last_dea_zero_cross_info(d1_macd, self.MAX_CANDLES_AGO)
+            form_A_long = form_A_long_cross_info['type'] == 'bullish' if form_A_long_cross_info else False
             form_B_long_info = self.check_freshness_since_zero_cross(d1_df, d1_macd, 'bullish', d1_atr)
             momentum_C_long = d1_last['macd'] > d1_last['signal'] and d1_last['histogram'] > d1_prev['histogram']
             if (form_A_long or form_B_long_info['is_fresh']) and momentum_C_long:
@@ -424,7 +425,8 @@ class OKXMonitor:
                 else:
                     return {**result_base, 'type': 'Long Watchlist', 'quality_score': None}
 
-            form_A_short = self.find_last_dea_zero_cross_info(d1_macd, self.MAX_CANDLES_AGO) == 'bearish'
+            form_A_short_cross_info = self.find_last_dea_zero_cross_info(d1_macd, self.MAX_CANDLES_AGO)
+            form_A_short = form_A_short_cross_info['type'] == 'bearish' if form_A_short_cross_info else False
             form_B_short_info = self.check_freshness_since_zero_cross(d1_df, d1_macd, 'bearish', d1_atr)
             momentum_C_short = d1_last['macd'] < d1_last['signal'] and d1_last['histogram'] < d1_prev['histogram']
             if (form_A_short or form_B_short_info['is_fresh']) and momentum_C_short:
@@ -493,6 +495,30 @@ class OKXMonitor:
             return None
 
     # --- 报告生成模块 ---
+    def get_strategy_explanation(self):
+        return """
+---
+### **策略说明**
+
+#### **评分体系**
+- **🏆 市场领袖分 (Leader Score)**: 综合评估币种的“龙头”特质。分数越高，龙头相越强。
+  - **构成**: 相对强度(40%), 回调抗性(30%), 资金流(20%), 趋势质量(10%).
+- **🚀 启动信号质量分**: 衡量趋势**起点**的强度和可靠性。
+  - **构成**: 成交量(30%), 动能(25%), 相对强度(15%), 均线距离(15%), 确认度(10%), 波动性(5%).
+- **➡️ 延续/回调质量分**: 衡量在**已确立趋势中**介入点的“性价比”。
+  - **构成**: 相对强度(40%), 趋势健康度(25%), 回调缩量(25%), 波动收缩(10%).
+
+#### **信号类型定义**
+- **🔥 凤凰信号 (Phoenix)**: 在长期多头趋势中，捕捉“深度回调”结束后的“黄金坑”机会。
+  - **核心**: 价格从趋势高点**回撤 > 70%**，且前期涨幅 > 15%，回调末端波动率收缩。
+- **🚀 启动 (Trend)**: 捕捉趋势反转的起点。
+  - **条件**: 日线级别“新鲜”穿越0轴 + 动能共振 + 4小时周期确认。
+- **➡️ 延续 (Continuation)**: 在强趋势中，捕捉中期(4H)回调结束后的最强确认点。
+  - **条件**: 日线0轴上/下稳定 + 4小时新鲜金叉/死叉 + 1小时刚刚金叉/死叉确认。
+- **🐂 回调 (Pullback)**: 在强趋势中，捕捉短期(1H)回调结束后的最早入场点。
+  - **条件**: 日线0轴上/下稳定 + 4小时回调动能衰竭 + 1小时刚刚金叉/死叉且动能增强。
+"""
+
     def create_opportunity_report(self, opportunities, market_info, upgraded_signals):
         # 按领袖分降序排序
         opportunities.sort(key=lambda x: x.get('leader_score', 0) or 0, reverse=True)
@@ -500,10 +526,12 @@ class OKXMonitor:
 
         type_map = { 'Long Trend': '🚀 多头启动', 'Long Phoenix': '🔥 凤凰信号', 'Long Continuation': '➡️ 多头延续', 'Long Pullback': '🐂 多头回调', 'Long Watchlist': '👀 多头观察', 'Short Trend': '📉 空头启动', 'Short Continuation': '↘️ 空头延续', 'Short Pullback': '🐻 空头回调', 'Short Watchlist': '👀 空头观察' }
         
-        content = f"### 市场情绪: {market_info.get('text', 'N/A')}\n<details><summary>点击查看情绪分析依据</summary>\n\n{market_info.get('details', '')}\n\n</details>\n\n"
+        # **修复**: 直接展示市场情绪细节，移除<details>标签
+        content = f"### 市场情绪: {market_info.get('text', 'N/A')}\n\n{market_info.get('details', '')}\n"
 
         def generate_table(title, opp_list):
             if not opp_list: return ""
+            # **修复**: 确保Markdown表格格式正确无误
             table = f"### {title}\n"
             table += "| 领袖分 | 质量分 | RS分 | 交易对 | 机会类型 | 趋势幅度 | 趋势时长 | 24H成交额 | 24H涨跌幅 |\n"
             table += "|:---:|:---:|:---:|:---|:---|:---:|:---:|:---:|:---:|\n"
@@ -511,14 +539,15 @@ class OKXMonitor:
                 inst_name = opp['inst_id'].replace('-USDT-SWAP', '')
                 opp_type = type_map.get(opp['type'], '未知')
                 vol_str = self.format_volume(opp['volume'])
-                change_24h_str = f"📈 {opp.get('price_change_24h', 0):.2f}%" if opp.get('price_change_24h', 0) > 0 else f"📉 {opp.get('price_change_24h', 0):.2f}%"
+                change_24h = opp.get('price_change_24h', 0)
+                change_24h_str = f"📈 {change_24h:.2f}%" if change_24h > 0 else f"📉 {change_24h:.2f}%"
                 
                 leader_score = f"**{opp.get('leader_score', 'N/A')}**" if opp.get('leader_score', 0) >= 80 else str(opp.get('leader_score', 'N/A'))
                 quality_score = f"**{opp.get('quality_score', 'N/A')}**" if opp.get('quality_score', 0) >= 80 else str(opp.get('quality_score', 'N/A'))
                 rs_score = f"**{opp.get('rs_score', 'N/A')}**" if opp.get('rs_score', 0) >= 80 else str(opp.get('rs_score', 'N/A'))
 
                 trend_change = opp.get('trend_change_pct', 0)
-                trend_change_str = f"📈 {trend_change:.1f}%" if trend_change > 0 else f"📉 {trend_change:.1f}%" if trend_change < 0 else "N/A"
+                trend_change_str = f"📈 {trend_change:.1f}%" if trend_change > 0 else (f"📉 {trend_change:.1f}%" if trend_change < 0 else "N/A")
                 trend_days = opp.get('trend_duration_days', 0)
                 trend_days_str = f"{trend_days:.1f}天" if trend_days > 0 else "N/A"
                 
@@ -536,8 +565,8 @@ class OKXMonitor:
         if new_actionable:
             content += generate_table('💎 新机会信号 (按领袖分排序)', new_actionable)
         
-        # 策略说明
-        content += "\n---\n**策略说明:** [点击查看详情](https://github.com/your-repo/your-project/wiki/Strategy-Details)" # 建议将长说明放在外部链接
+        # **修复**: 直接展示策略说明
+        content += self.get_strategy_explanation()
         return content
 
 
@@ -554,7 +583,7 @@ class OKXMonitor:
             '1H': self._parse_klines_to_df(btc_data['h1'])['close']
         }
         macds = {tf: self.calculate_macd(prices) for tf, prices in klines.items()}
-        if any(m.empty for m in macds.values()): return {'sentiment': 'Neutral', 'text':"BTC数据不足"}
+        if any(m.empty for m in macds.values()): return {'sentiment': 'Neutral', 'text':"BTC数据不足", 'details': ''}
 
         score, bull_points, bear_points = 0, [], []
         weights = {'1D': 2, '4H': 1, '1H': 0.5}
@@ -564,10 +593,20 @@ class OKXMonitor:
             tf_text = f"**{tf}**:"
             if last['macd'] > 0 and last['signal'] > 0: score += 1 * weights[tf]; bull_points.append(f"{tf_text} 双线位于0轴之上")
             if last['macd'] < 0 and last['signal'] < 0: score -= 1 * weights[tf]; bear_points.append(f"{tf_text} 双线位于0轴之下")
-            if last['macd'] > last['signal']: score += 0.5 * weights[tf]
-            else: score -= 0.5 * weights[tf]
-            if last['histogram'] > prev['histogram']: bull_points.append(f"{tf_text} 动能增强")
-            else: bear_points.append(f"{tf_text} 动能减弱")
+            
+            if last['macd'] > last['signal']:
+                score += 0.5 * weights[tf]
+                point = f"{tf_text} 金叉"
+                if last['histogram'] > prev['histogram']: point += "且多头动能增强"
+                else: point += "但多头动能减弱"
+                bull_points.append(point)
+            else:
+                score -= 0.5 * weights[tf]
+                point = f"{tf_text} 死叉"
+                if last['histogram'] < prev['histogram']: point += "且空头动能增强"
+                else: point += "但空头动能减弱"
+                bear_points.append(point)
+
 
         if score >= 3.5: sentiment, text = 'Bullish', "强势看涨 🐂"
         elif score >= 1.5: sentiment, text = 'Bullish', "震荡偏多 📈"
@@ -575,9 +614,13 @@ class OKXMonitor:
         elif score <= -1.5: sentiment, text = 'Bearish', "震荡偏空 📉"
         else: sentiment, text = 'Neutral', "多空胶着 횡보"
         
-        details = f"🐂 **看多理由**:\n- " + "\n- ".join(bull_points) if bull_points else ""
-        details += f"\n\n🐻 **看空理由**:\n- " + "\n- ".join(bear_points) if bear_points else ""
-        return {'sentiment': sentiment, 'text': text, 'details': details}
+        details = ""
+        if bull_points:
+            details += "#### 🐂 看多理由\n- " + "\n- ".join(bull_points)
+        if bear_points:
+            details += "\n\n#### 🐻 看空理由\n- " + "\n- ".join(bear_points)
+
+        return {'sentiment': sentiment, 'text': text, 'details': details.strip()}
 
     def load_watchlist_state(self):
         if not os.path.exists(self.state_file): return {}
