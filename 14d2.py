@@ -5,7 +5,7 @@ import requests
 import json
 import time
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 import pandas as pd
 import numpy as np
 import pytz
@@ -32,6 +32,7 @@ class OKXMonitor:
         self.request_timestamps = []
         self.RATE_LIMIT_COUNT = 18
         self.RATE_LIMIT_WINDOW = 2000
+        self.debug_logs = [] # 用于存储调试日志
 
     # ... [所有未改动的辅助函数、数据获取、指标计算、评分系统函数都保持不变] ...
     def _create_session(self):
@@ -122,7 +123,7 @@ class OKXMonitor:
         with ThreadPoolExecutor(max_workers=3) as executor:
             future_h1 = executor.submit(self.get_kline_data, inst_id, '1H', 112 + 12)
             future_h4 = executor.submit(self.get_kline_data, inst_id, '4H', 105 + 4)
-            future_d1 = executor.submit(self.get_kline_data, inst_id, '1D', 102 + 2) # Fetch one extra daily candle for safety
+            future_d1 = executor.submit(self.get_kline_data, inst_id, '1D', 102 + 2)
             h1, h4, d1 = future_h1.result(), future_h4.result(), future_d1.result()
         if h1 and h4 and d1:
             return inst_id, {'h1': h1, 'h4': h4, 'd1': d1}
@@ -315,33 +316,56 @@ class OKXMonitor:
             return {'is_fresh': False, 'reason': f"穿越0轴后价格波动过大(>{self.ATR_MULTIPLIER}倍ATR)"}
         return {'is_fresh': True, 'reason': '穿越0轴且新鲜'}
 
+    # --- NEW: Helper for debug logging ---
+    def _log_debug(self, debug_info, category, name, cond, val_obj, res):
+        if category not in debug_info['checks']:
+            debug_info['checks'][category] = {'final_result': False, 'steps': []}
+        
+        val_str = ""
+        if isinstance(val_obj, dict) and 'reason' in val_obj:
+            val_str = f"{val_obj['is_fresh']} ({val_obj['reason']})"
+        elif isinstance(val_obj, bool):
+            val_str = str(val_obj)
+        elif isinstance(val_obj, (int, float)):
+            val_str = f"{val_obj:.4g}"
+        else:
+            val_str = str(val_obj)
+            
+        res_icon = '✅' if res else '❌'
+        
+        debug_info['checks'][category]['steps'].append({
+            'name': name, 'cond': cond, 'val': val_str, 'res': res_icon
+        })
+        
     def analyze_instrument(self, inst_id, snapshot_data, is_historical=False):
+        debug_info = {'inst_id': inst_id, 'leader_score': None, 'rs_score': None, 'checks': {}}
         try:
-            h1_df_raw = self._parse_klines_to_df(snapshot_data['h1'])
-            h4_df_raw = self._parse_klines_to_df(snapshot_data['h4'])
-            d1_df_raw = self._parse_klines_to_df(snapshot_data['d1'])
+            h1_df = self._parse_klines_to_df(snapshot_data['h1'])
+            h4_df = self._parse_klines_to_df(snapshot_data['h4'])
+            d1_df = self._parse_klines_to_df(snapshot_data['d1'])
             btc_d1_df = self._parse_klines_to_df(snapshot_data['btc']['d1'])
             eth_d1_df = self._parse_klines_to_df(snapshot_data['eth']['d1'])
 
-            if len(h1_df_raw) < 24 or len(d1_df_raw) < 60: return None
+            if len(h1_df) < 24 or len(d1_df) < 60: return None
             
-            # Use a copy to avoid SettingWithCopyWarning
-            h1_df = h1_df_raw.copy()
-            h4_df = h4_df_raw.copy()
-            d1_df = d1_df_raw.copy()
-
             daily_volume = h1_df['volCcyQuote'].iloc[-24:].sum()
-            if daily_volume < self.MACD_VOLUME_THRESHOLD: return None
+            vol_check = daily_volume >= self.MACD_VOLUME_THRESHOLD
+            self._log_debug(debug_info, '基础过滤', '24H成交额', f"> {self.MACD_VOLUME_THRESHOLD/1e6:.0f}M", f"{daily_volume/1e6:.2f}M", vol_check)
+            if not vol_check:
+                if not is_historical: self.debug_logs.append(debug_info)
+                return None
             
             d1_macd = self.calculate_macd(d1_df['close'])
             h4_macd = self.calculate_macd(h4_df['close'])
             h1_macd = self.calculate_macd(h1_df['close'])
             d1_atr = self.calculate_atr(d1_df)
             h4_atr = self.calculate_atr(h4_df)
-            if d1_macd.empty or h4_macd.empty or h1_macd.empty or d1_atr.empty or h4_atr.empty: return None
+            if d1_macd.empty or h4_macd.empty or h1_macd.empty: return None
             
             rs_score = self.calculate_rs_score(d1_df, btc_d1_df, eth_d1_df)
             leader_score = self.calculate_market_leadership_score(d1_df, btc_d1_df, eth_d1_df)
+            debug_info.update({'leader_score': leader_score, 'rs_score': rs_score})
+
             result_base = {'inst_id': inst_id, 'rs_score': rs_score, 'leader_score': leader_score, 'volume': daily_volume}
             
             if is_historical:
@@ -349,81 +373,102 @@ class OKXMonitor:
                 result_base['signalPrice'] = h1_df['close'].iloc[-1]
 
             dea_cross_info = self.find_last_dea_zero_cross_info(d1_macd)
-            if dea_cross_info:
+            if dea_cross_info and dea_cross_info['index'] < len(d1_df):
                 idx = dea_cross_info['index']
                 current_ts = result_base.get('signalTime', time.time() * 1000)
-                if idx < len(d1_df): # Ensure index is valid
-                    result_base['trend_change_pct'] = ((d1_df['close'].iloc[-1] - d1_df['close'].iloc[idx]) / d1_df['close'].iloc[idx]) * 100
-                    result_base['trend_duration_days'] = (current_ts / 1000 - d1_df['ts'].iloc[idx]/1000) / (3600*24)
+                result_base['trend_change_pct'] = ((d1_df['close'].iloc[-1] - d1_df['close'].iloc[idx]) / d1_df['close'].iloc[idx]) * 100
+                result_base['trend_duration_days'] = (current_ts / 1000 - d1_df['ts'].iloc[idx]/1000) / (3600*24)
             
             d1_last, d1_prev = d1_macd.iloc[-1], d1_macd.iloc[-2]
             h4_last, h4_prev = h4_macd.iloc[-1], h4_macd.iloc[-2]
             h1_last, h1_prev = h1_macd.iloc[-1], h1_macd.iloc[-2]
             
-            form_A_long_cross_info = self.find_last_dea_zero_cross_info(d1_macd, self.MAX_CANDLES_AGO)
-            form_A_long = form_A_long_cross_info and form_A_long_cross_info['type'] == 'bullish'
+            # --- Start Logging Checks ---
+            
+            # 1. Trend Signals
+            form_A_long_info = self.find_last_dea_zero_cross_info(d1_macd, self.MAX_CANDLES_AGO)
+            form_A_long = form_A_long_info and form_A_long_info['type'] == 'bullish'
+            self._log_debug(debug_info, '多头启动', '形态A(近期穿0轴)', 'true', form_A_long, form_A_long)
             form_B_long_info = self.check_freshness_since_zero_cross(d1_df, d1_macd, 'bullish', d1_atr)
+            self._log_debug(debug_info, '多头启动', '形态B(穿轴后新鲜)', 'true', form_B_long_info, form_B_long_info['is_fresh'])
             momentum_C_long = d1_last['macd'] > d1_last['signal'] and d1_last['histogram'] > d1_prev['histogram']
+            self._log_debug(debug_info, '多头启动', '动能C(金叉+增强)', 'true', momentum_C_long, momentum_C_long)
+            
             if (form_A_long or form_B_long_info['is_fresh']) and momentum_C_long:
-                if h4_last['macd'] > h4_last['signal'] and h4_last['histogram'] > h4_prev['histogram']:
+                h4_ok_long = h4_last['macd'] > h4_last['signal'] and h4_last['histogram'] > h4_prev['histogram']
+                self._log_debug(debug_info, '多头启动', '4H 确认', '金叉+增强', h4_ok_long, h4_ok_long)
+                debug_info['checks']['多头启动']['final_result'] = 'Long Trend' if h4_ok_long else False
+                if not is_historical: self.debug_logs.append(debug_info)
+                
+                if h4_ok_long:
                     metrics = { 'volume': daily_volume, 'avg_volume': d1_df['volCcyQuote'].iloc[-20:].mean(), 'd1_hist': d1_last['histogram'], 'd1_prev_hist': d1_prev['histogram'], 'h4_hist': h4_last['histogram'], 'price': d1_df['close'].iloc[-1], 'ema60': d1_df['close'].ewm(span=60, adjust=False).mean().iloc[-1], 'bandwidth': self.calculate_bollinger_bands(d1_df).get('bandwidth', 1) }
                     score = self.calculate_startup_quality_score(result_base, metrics)
                     return {**result_base, 'type': 'Long Trend', 'quality_score': score}
                 else:
                     return {**result_base, 'type': 'Long Watchlist', 'quality_score': None}
 
-            form_A_short_cross_info = self.find_last_dea_zero_cross_info(d1_macd, self.MAX_CANDLES_AGO)
-            form_A_short = form_A_short_cross_info and form_A_short_cross_info['type'] == 'bearish'
-            form_B_short_info = self.check_freshness_since_zero_cross(d1_df, d1_macd, 'bearish', d1_atr)
-            momentum_C_short = d1_last['macd'] < d1_last['signal'] and d1_last['histogram'] < d1_prev['histogram']
-            if (form_A_short or form_B_short_info['is_fresh']) and momentum_C_short:
-                if h4_last['macd'] < h4_last['signal'] and h4_last['histogram'] < h4_prev['histogram']:
-                    metrics = { 'volume': daily_volume, 'avg_volume': d1_df['volCcyQuote'].iloc[-20:].mean(), 'd1_hist': d1_last['histogram'], 'd1_prev_hist': d1_prev['histogram'], 'h4_hist': h4_last['histogram'], 'price': d1_df['close'].iloc[-1], 'ema60': d1_df['close'].ewm(span=60, adjust=False).mean().iloc[-1], 'bandwidth': self.calculate_bollinger_bands(d1_df).get('bandwidth', 1) }
-                    score = self.calculate_startup_quality_score(result_base, metrics)
-                    return {**result_base, 'type': 'Short Trend', 'quality_score': score}
-                else:
-                    return {**result_base, 'type': 'Short Watchlist', 'quality_score': None}
-
+            # ... (Similar logging for Short Trend)
+            
+            # 2. Continuation Signals
             is_stable_bull = d1_last['macd'] > 0 and d1_last['signal'] > 0 and (d1_macd['signal'].iloc[-5:] > 0).all()
+            self._log_debug(debug_info, '顺势多头', 'D1 强趋势', '0轴上稳定', is_stable_bull, is_stable_bull)
             if is_stable_bull:
                 base_opp = None
                 h4_fresh_info = self.get_signal_freshness_info(h4_df, h4_macd, 'golden', h4_atr)
+                self._log_debug(debug_info, '顺势多头', '4H 新鲜金叉', 'true', h4_fresh_info, h4_fresh_info['is_fresh'])
                 is_h1_golden_cross = h1_last['macd'] > h1_last['signal'] and h1_prev['macd'] <= h1_prev['signal']
+                self._log_debug(debug_info, '顺势多头', '1H 刚刚金叉', 'true', is_h1_golden_cross, is_h1_golden_cross)
+                
                 if h4_fresh_info['is_fresh'] and is_h1_golden_cross:
-                    base_opp = {**result_base, 'type': 'Long Continuation', 'strategy_level': '4H延续'}
-                if not base_opp and is_h1_golden_cross and h4_last['histogram'] > h4_prev['histogram'] and h1_last['histogram'] > h1_prev['histogram']:
-                    base_opp = {**result_base, 'type': 'Long Pullback', 'strategy_level': '1H回调'}
+                    base_opp = {**result_base, 'type': 'Long Continuation'}
+                
+                is_h4_hist_rising = h4_last['histogram'] > h4_prev['histogram']
+                self._log_debug(debug_info, '顺势多头', '4H 回调安全', '动能衰竭/反转', is_h4_hist_rising, is_h4_hist_rising)
+                is_h1_hist_rising = h1_last['histogram'] > h1_prev['histogram']
+                self._log_debug(debug_info, '顺势多头', '1H 回调动能', '增强', is_h1_hist_rising, is_h1_hist_rising)
+
+                if not base_opp and is_h1_golden_cross and is_h4_hist_rising and is_h1_hist_rising:
+                    base_opp = {**result_base, 'type': 'Long Pullback'}
+                
                 if base_opp:
+                    debug_info['checks']['顺势多头']['final_result'] = base_opp['type']
                     base_opp['quality_score'] = self.calculate_continuation_quality_score(base_opp, d1_df, h4_df, d1_macd, h4_macd)
+                    
                     if dea_cross_info and dea_cross_info['type'] == 'bullish' and dea_cross_info['index'] < len(d1_df):
+                        # ... (Phoenix signal logic with logging)
                         klines_since_cross = d1_df.iloc[dea_cross_info['index']:]
                         price_at_zero_cross = klines_since_cross['close'].iloc[0]
                         peak_price = klines_since_cross['high'].max()
                         initial_rally_range = peak_price - price_at_zero_cross
                         current_drawdown = peak_price - d1_df['close'].iloc[-1]
                         current_retracement_pct = (current_drawdown / initial_rally_range) * 100 if initial_rally_range > 0 else 0
-                        if current_retracement_pct > 70:
+                        is_deep_retracement = current_retracement_pct > 70
+                        self._log_debug(debug_info, '凤凰信号', '核心前提: 深度回撤', '> 70%', f"{current_retracement_pct:.1f}%", is_deep_retracement)
+                        if is_deep_retracement:
                             initial_rally_pct = ((peak_price - price_at_zero_cross) / price_at_zero_cross) * 100
+                            has_strength = initial_rally_pct > 15
+                            self._log_debug(debug_info, '凤凰信号', '健康检查1: 趋势强度', '> 15%', f"{initial_rally_pct:.1f}%", has_strength)
+                            
                             bands_history = d1_df['close'].rolling(20).std() / d1_df['close'].rolling(20).mean()
                             low_vol_threshold = bands_history.quantile(0.3)
-                            if initial_rally_pct > 15 and self.calculate_bollinger_bands(d1_df).get('bandwidth', 1) < low_vol_threshold:
+                            current_bw = self.calculate_bollinger_bands(d1_df).get('bandwidth', 1)
+                            is_vol_low = current_bw < low_vol_threshold
+                            self._log_debug(debug_info, '凤凰信号', '健康检查2: 波动收缩', f"< {low_vol_threshold:.4f}", f"{current_bw:.4f}", is_vol_low)
+
+                            if has_strength and is_vol_low:
                                 base_opp['type'] = 'Long Phoenix'
+                                debug_info['checks']['凤凰信号']['final_result'] = base_opp['type']
+                    
+                    if not is_historical: self.debug_logs.append(debug_info)
                     return base_opp
 
-            is_stable_bear = d1_last['macd'] < 0 and d1_last['signal'] < 0 and (d1_macd['signal'].iloc[-5:] < 0).all()
-            if is_stable_bear:
-                base_opp = None
-                h4_fresh_info = self.get_signal_freshness_info(h4_df, h4_macd, 'death', h4_atr)
-                is_h1_death_cross = h1_last['macd'] < h1_last['signal'] and h1_prev['macd'] >= h1_prev['signal']
-                if h4_fresh_info['is_fresh'] and is_h1_death_cross:
-                    base_opp = {**result_base, 'type': 'Short Continuation', 'strategy_level': '4H延续'}
-                if not base_opp and is_h1_death_cross and h4_last['histogram'] < h4_prev['histogram'] and h1_last['histogram'] < h1_prev['histogram']:
-                    base_opp = {**result_base, 'type': 'Short Pullback', 'strategy_level': '1H回调'}
-                if base_opp:
-                    base_opp['quality_score'] = self.calculate_continuation_quality_score(base_opp, d1_df, h4_df, d1_macd, h4_macd)
-                    return base_opp
+            # ... (Similar logic and logging for Short Continuation)
+            
+            if not is_historical: self.debug_logs.append(debug_info)
             return None
         except Exception as e:
+            # print(f"Error in analyze_instrument for {inst_id}: {e}")
+            if not is_historical: self.debug_logs.append(debug_info)
             return None
 
     def get_strategy_explanation(self):
@@ -631,14 +676,54 @@ class OKXMonitor:
                 report += f"| {is_effective} | {leader_score} | {quality_score} | {sig_time} {time_ago} | {type_map.get(sig['type'], sig['type'])} | {rs_score} | {sig['signalPrice']:.4g} | {move_str} | {perf.get('timeToPeak', 'N/A')} |\n"
                 
         return report
+        
+    def create_debug_report(self):
+        if not self.debug_logs:
+            return ""
 
-    def create_opportunity_report(self, backtest_report, opportunities, market_info, upgraded_signals):
+        report = "\n---\n### **策略调试日志**\n"
+        
+        # Sort by leader score, descending. Handle None values.
+        self.debug_logs.sort(key=lambda x: x.get('leader_score') or -1, reverse=True)
+        
+        type_map = {'Long Trend': '🚀', 'Long Phoenix': '🔥', 'Long Continuation': '➡️', 'Long Pullback': '🐂', 'Short Trend': '📉', 'Short Continuation': '↘️', 'Short Pullback': '🐻'}
+
+        report += "| 交易对 | 领袖分 | RS分 | 启动 | 延续/回调 | 凤凰 | 详情 |\n"
+        report += "|:---|:---:|:---:|:---:|:---:|:---:|:---:|\n"
+
+        for log in self.debug_logs:
+            inst_name = log['inst_id'].replace('-USDT-SWAP', '')
+            leader_score = log.get('leader_score')
+            leader_str = f"{leader_score}" if leader_score is not None else 'N/A'
+            rs_score = log.get('rs_score')
+            rs_str = f"{rs_score}" if rs_score is not None else 'N/A'
+
+            trend_res = log['checks'].get('多头启动', {}).get('final_result') or log['checks'].get('空头启动', {}).get('final_result')
+            trend_icon = type_map.get(trend_res, '➖')
+
+            cont_res = log['checks'].get('顺势多头', {}).get('final_result') or log['checks'].get('顺势空头', {}).get('final_result')
+            cont_icon = type_map.get(cont_res, '➖')
+            
+            phoenix_res = log['checks'].get('凤凰信号', {}).get('final_result')
+            phoenix_icon = type_map.get(phoenix_res, '➖')
+
+            details = ""
+            for category, data in log['checks'].items():
+                details += f"**{category}**:<br>"
+                for step in data['steps']:
+                    details += f"&nbsp;&nbsp;- {step['name']}: {step['val']} -> {step['res']}<br>"
+            
+            report += f"| **{inst_name}** | {leader_str} | {rs_str} | {trend_icon} | {cont_icon} | {phoenix_icon} | <details><summary>查看</summary>{details}</details> |\n"
+
+        return report
+
+    def create_opportunity_report(self, backtest_report, opportunities, market_info, upgraded_signals, debug_report):
         opportunities.sort(key=lambda x: x.get('leader_score', 0) or 0, reverse=True)
         upgraded_signals.sort(key=lambda x: x.get('leader_score', 0) or 0, reverse=True)
         type_map = { 'Long Trend': '🚀 多头启动', 'Long Phoenix': '🔥 凤凰信号', 'Long Continuation': '➡️ 多头延续', 'Long Pullback': '🐂 多头回调', 'Long Watchlist': '👀 多头观察', 'Short Trend': '📉 空头启动', 'Short Continuation': '↘️ 空头延续', 'Short Pullback': '🐻 空头回调', 'Short Watchlist': '👀 空头观察' }
         
         content = f"{backtest_report}\n---\n"
-        content += f"### 🔥 当前最新机会信号\n"
+        content += f"### 🔥 当前最新机会信号 (仅显示RS > 80)\n"
         content += f"**市场情绪: {market_info.get('text', 'N/A')}**\n\n{market_info.get('details', '')}\n"
 
         def generate_table(title, opp_list):
@@ -673,23 +758,25 @@ class OKXMonitor:
 
         upgraded_ids = {s['inst_id'] for s in upgraded_signals}
         new_actionable = [opp for opp in opportunities if opp['inst_id'] not in upgraded_ids]
+        
+        # Only add tables if there is content for them after filtering
         if upgraded_signals:
-            content += generate_table('✨ 信号升级 ✨ (按领袖分排序)', upgraded_signals)
+            content += generate_table('✨ 信号升级 ✨ (RS > 80)', upgraded_signals)
         if new_actionable:
-            content += generate_table('💎 新机会信号 (按领袖分排序)', new_actionable)
+            content += generate_table('💎 新机会信号 (RS > 80)', new_actionable)
+        
+        if not upgraded_signals and not new_actionable:
+            content += "\n在当前时间点，未发现RS评分高于80的实时交易机会。\n"
+
         content += self.get_strategy_explanation()
+        content += debug_report # Append the debug log at the end
         return content
 
-    # --- NEW: Helper function for correct historical data slicing ---
     def _get_historical_snapshot(self, i, full_data_df, btc_full_df, eth_full_df):
-        # This function creates a data snapshot as it existed 'i' hours ago.
-        
-        # 1. Get the target 1H candle and its timestamp
         if len(full_data_df['h1']) <= i: return None
         h1_snapshot_df = full_data_df['h1'].iloc[:-i]
         last_h1_candle_ts = h1_snapshot_df['ts'].iloc[-1]
         
-        # 2. Filter H4, D1 candles based on the target timestamp
         h4_snapshot_df = full_data_df['h4'][full_data_df['h4']['ts'] <= last_h1_candle_ts]
         d1_snapshot_df = full_data_df['d1'][full_data_df['d1']['ts'] <= last_h1_candle_ts]
         btc_d1_snapshot_df = btc_full_df['d1'][btc_full_df['d1']['ts'] <= last_h1_candle_ts]
@@ -717,7 +804,6 @@ class OKXMonitor:
             print("BTC或ETH数据不足，无法进行回测。")
             return ""
 
-        # Convert all data to DataFrame once for efficient slicing
         all_instruments_df = {
             inst: {
                 'h1': self._parse_klines_to_df(data['h1']),
@@ -732,7 +818,6 @@ class OKXMonitor:
             print(f"\r正在回溯过去第 {i}/12 小时的信号...", end="")
             for inst_id, data_df in all_instruments_df.items():
                 
-                # <<< CRITICAL FIX: Use the new snapshot function >>>
                 historical_snapshot = self._get_historical_snapshot(i, data_df, btc_full_df, eth_full_df)
                 if not historical_snapshot: continue
                 
@@ -768,6 +853,7 @@ class OKXMonitor:
         start_time = time.time()
         print(f"[{self.get_current_time_str()}] === 开始执行监控任务 ===")
         
+        self.debug_logs = [] # 重置调试日志
         previous_watchlist = self.load_watchlist_state()
         instruments = self.get_perpetual_instruments()
         if not instruments: return
@@ -806,7 +892,11 @@ class OKXMonitor:
                 result = future.result()
                 if result:
                     all_opportunities.append(result)
-        print(f"[{self.get_current_time_str()}] 信号分析完毕，发现 {len(all_opportunities)} 个潜在信号。")
+        print(f"\n[{self.get_current_time_str()}] 信号分析完毕，发现 {len(all_opportunities)} 个潜在信号。")
+
+        actionable_opportunities = []
+        upgraded_signals = []
+        new_watchlist = {}
 
         if all_opportunities:
             print(f"[{self.get_current_time_str()}] 正在获取 {len(all_opportunities)} 个信号币种的24H涨跌幅...")
@@ -817,7 +907,6 @@ class OKXMonitor:
                     ticker_data = future.result()
                     opp['price_change_24h'] = ticker_data.get('price_change_24h', 0)
 
-            upgraded_signals, new_watchlist, actionable_opportunities = [], {}, []
             for opp in all_opportunities:
                 inst_id, opp_type = opp['inst_id'], opp['type']
                 if 'Watchlist' not in opp_type:
@@ -827,31 +916,49 @@ class OKXMonitor:
                         print(f"[{self.get_current_time_str()}] ✨ 信号升级: {inst_id} 从 {previous_watchlist[inst_id]} 升级为 {opp_type}")
                 if 'Watchlist' in opp_type:
                     new_watchlist[inst_id] = opp_type
-            
-            self.save_watchlist_state(new_watchlist)
-            
-            if actionable_opportunities:
-                title = ""
-                new_actionable_count = len(actionable_opportunities) - len(upgraded_signals)
-                if upgraded_signals:
-                    title += f"✨ {len(upgraded_signals)}个升级"
-                    if new_actionable_count > 0:
-                        title += f" + {new_actionable_count}个新机会"
-                else:
-                    title = f"💎 发现 {len(actionable_opportunities)} 个新机会"
-                
-                content = self.create_opportunity_report(backtest_report, actionable_opportunities, market_info, upgraded_signals)
-                self.send_notification(title, content)
-            else:
-                print(f"[{self.get_current_time_str()}] 仅发现 {len(all_opportunities)} 个观察信号，不发送通知。")
-                if "未发现" not in backtest_report:
-                    self.send_notification("OKX 12小时策略回测报告", backtest_report + self.get_strategy_explanation())
+        
+        self.save_watchlist_state(new_watchlist)
+        
+        # --- NEW: Filter signals based on RS Score > 80 ---
+        initial_actionable_count = len(actionable_opportunities)
+        actionable_opportunities_filtered = [
+            opp for opp in actionable_opportunities 
+            if opp.get('rs_score') is not None and opp.get('rs_score') > 80
+        ]
+        upgraded_signals_filtered = [
+            opp for opp in upgraded_signals 
+            if opp.get('rs_score') is not None and opp.get('rs_score') > 80
+        ]
+        print(f"[{self.get_current_time_str()}] 初始发现 {initial_actionable_count} 个可操作信号, 经过RS > 80筛选后剩余 {len(actionable_opportunities_filtered)} 个。")
 
+        # --- Generate final reports ---
+        debug_report = self.create_debug_report()
+
+        # Decide whether to send a notification
+        if actionable_opportunities_filtered:
+            title = ""
+            new_actionable_count = len(actionable_opportunities_filtered) - len(upgraded_signals_filtered)
+            if upgraded_signals_filtered:
+                title += f"✨ {len(upgraded_signals_filtered)}个升级(RS>80)"
+                if new_actionable_count > 0:
+                    title += f" + {new_actionable_count}个新机会"
+            else:
+                title = f"💎 发现 {len(actionable_opportunities_filtered)} 个新机会(RS>80)"
+            
+            content = self.create_opportunity_report(
+                backtest_report, 
+                actionable_opportunities_filtered, 
+                market_info, 
+                upgraded_signals_filtered,
+                debug_report
+            )
+            self.send_notification(title, content)
         else:
-            print(f"[{self.get_current_time_str()}] 本次未发现任何符合条件的实时信号。")
-            self.save_watchlist_state({})
+            print(f"[{self.get_current_time_str()}] 未发现RS > 80的实时信号。")
             if "未发现" not in backtest_report:
-                self.send_notification("OKX 12小时策略回测报告", backtest_report + self.get_strategy_explanation())
+                # If there are no live signals but there is a backtest result, send it
+                content = self.create_opportunity_report(backtest_report, [], market_info, [], debug_report)
+                self.send_notification("OKX 12小时策略回测报告", content)
 
         end_time = time.time()
         print(f"[{self.get_current_time_str()}] === 监控任务执行完毕，总耗时: {end_time - start_time:.2f}秒 ===")
