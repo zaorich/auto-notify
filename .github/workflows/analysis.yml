@@ -22,6 +22,8 @@ jobs:
   run-analysis:
     # 指定运行环境，使用最新的Ubuntu系统
     runs-on: ubuntu-latest
+    permissions:                # <--- 添加在这里
+      contents: write           # <--- 允许写入内容
 
     # 定义任务的步骤
     steps:
