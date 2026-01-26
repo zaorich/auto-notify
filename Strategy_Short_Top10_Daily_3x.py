@@ -371,7 +371,7 @@ if __name__ == "__main__":
     last_rot = state.get('last_rotation_date', '')
     
     # 逻辑判断：每天早上8点 (08:00 - 08:59) 执行且仅执行一次换仓
-    if today_str != last_rot and now_bj.hour == 8:
-        run_rotation(state)
-    else:
-        run_monitor(state)
+    # if today_str != last_rot and now_bj.hour == 8:
+    #     run_rotation(state)
+    # else:
+    run_monitor(state)
