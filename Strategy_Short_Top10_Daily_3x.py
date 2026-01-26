@@ -277,7 +277,12 @@ if __name__ == "__main__":
     
     last_rot = state.get('last_rotation_date', '')
     
-    if today_str != last_rot and now_bj.hour == 8:
-        run_rotation(state)
-    else:
-        run_monitor(state)
+    # if today_str != last_rot and now_bj.hour == 8:
+    #     run_rotation(state)
+    # else:
+    #     run_monitor(state)
+    # 强制执行换仓（测试用，测完记得改回去！）
+    # if today_str != last_rot and now_bj.hour == 8: 
+    run_rotation(state)  # <--- 直接调用这个函数，不要 if 判断
+    # else:
+    #    run_monitor(state)
