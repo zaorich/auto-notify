@@ -27,9 +27,12 @@ HISTORY_FILE = 'data/Record_Daily_PnL.csv'
 INTRADAY_FILE = 'data/Record_5min_Equity.csv'
 
 # 初始化币安交易所 (仅获取行情，不需要 API Key)
+# 修改后的代码
 exchange = ccxt.binance({
     'enableRateLimit': True,
-    'options': {'defaultType': 'future'}
+    'options': {'defaultType': 'future'},
+    # 👇 增加这一行，利用公共代理绕过 IP 限制
+    'proxy': 'https://corsproxy.io/?', 
 })
 
 # ================= 🛠️ 辅助函数 =================
