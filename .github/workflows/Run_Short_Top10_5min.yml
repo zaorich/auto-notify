@@ -1,0 +1,43 @@
+name: Short Top10 Strategy (5min Monitor)
+
+on:
+  schedule:
+    # 每5分钟触发一次
+    - cron: '*/5 * * * *'
+  workflow_dispatch: # 允许手动点按钮触发
+
+permissions:
+  contents: write # 赋予写权限，允许提交数据回仓库
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+
+    - name: Install dependencies
+      run: pip install -r requirements.txt
+
+    - name: Run Strategy Script
+      env:
+        # 将 GitHub Secrets 中的 KEY 注入环境变量
+        SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
+      run: python Strategy_Short_Top10_Daily_3x.py
+
+    - name: Commit and Push Data
+      run: |
+        git config --global user.name 'StrategyBot'
+        git config --global user.email 'bot@noreply.github.com'
+        # 拉取最新代码，防止因并发导致的冲突
+        git pull --rebase
+        # 添加 data 文件夹下的所有变动
+        git add data/
+        # 只有当有变动时才提交，避免空提交报错
+        git diff --quiet && git diff --staged --quiet || (git commit -m "Auto: Update market data & logs [skip ci]" && git push)
