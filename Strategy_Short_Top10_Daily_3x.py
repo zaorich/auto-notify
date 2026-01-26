@@ -1,13 +1,13 @@
-import ccxt
+import requests
 import pandas as pd
 import json
 import os
 import sys
-import requests
+import time
 from datetime import datetime, timedelta
 
 # ================= 🔧 策略配置区域 =================
-# 初始资金 (仅用于第一次运行初始化，后续会读取 json 里的余额)
+# 初始资金 (仅用于第一次运行初始化)
 INITIAL_BALANCE = 1000 
 # 杠杆倍数
 LEVERAGE = 3 
@@ -21,19 +21,17 @@ FEE_RATE = 0.001
 # Server酱 Key (从环境变量获取，安全)
 SERVERCHAN_KEY = os.environ.get('SERVERCHAN_KEY', '')
 
+# 如果你在本地或特殊网络环境下运行，可以在这里配置代理
+# 例如: PROXIES = {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"}
+PROXIES = None 
+
 # 数据文件路径
 STATE_FILE = 'data/State_Current_Positions.json'
 HISTORY_FILE = 'data/Record_Daily_PnL.csv'
 INTRADAY_FILE = 'data/Record_5min_Equity.csv'
 
-# 初始化币安交易所 (仅获取行情，不需要 API Key)
-# 修改后的代码
-exchange = ccxt.binance({
-    'enableRateLimit': True,
-    'options': {'defaultType': 'future'},
-    # 👇 增加这一行，利用公共代理绕过 IP 限制
-    'proxy': 'https://corsproxy.io/?', 
-})
+# API 基础地址
+BASE_URL = "https://fapi.binance.com"
 
 # ================= 🛠️ 辅助函数 =================
 
@@ -44,7 +42,7 @@ def get_beijing_time():
 def send_wechat_notification(title, content):
     """发送微信通知"""
     if not SERVERCHAN_KEY:
-        print("❌ 未配置 SERVERCHAN_KEY，跳过发送通知")
+        # print("❌ 未配置 SERVERCHAN_KEY，跳过发送通知")
         return
 
     url = f"https://sctapi.ftqq.com/{SERVERCHAN_KEY}.send"
@@ -87,23 +85,117 @@ def append_history(date, balance, pnl, notes):
     }])
     df.to_csv(HISTORY_FILE, mode='a', header=not file_exists, index=False)
 
+# ================= 📡 数据获取模块 (参考 HTML 逻辑) =================
+
+def get_valid_symbols():
+    """
+    获取符合条件的交易对：
+    1. 合约类型 = PERPETUAL (永续)
+    2. 状态 = TRADING (交易中)
+    3. 计价货币 = USDT
+    """
+    url = f"{BASE_URL}/fapi/v1/exchangeInfo"
+    try:
+        response = requests.get(url, timeout=10, proxies=PROXIES)
+        response.raise_for_status()
+        data = response.json()
+        
+        valid_set = set()
+        for s in data['symbols']:
+            if (s['contractType'] == 'PERPETUAL' and 
+                s['status'] == 'TRADING' and 
+                s['quoteAsset'] == 'USDT'):
+                valid_set.add(s['symbol'])
+        return valid_set
+    except Exception as e:
+        print(f"❌ 获取交易规则失败: {e}")
+        return set()
+
+def get_current_prices(symbol_list=None):
+    """
+    获取最新价格
+    如果传入 symbol_list，则只返回这些币的价格字典
+    """
+    url = f"{BASE_URL}/fapi/v1/ticker/price"
+    try:
+        response = requests.get(url, timeout=10, proxies=PROXIES)
+        response.raise_for_status()
+        data = response.json()
+        
+        prices = {}
+        for item in data:
+            sym = item['symbol']
+            # 如果指定了列表，只存列表里的；否则全存
+            if symbol_list is None or sym in symbol_list:
+                prices[sym] = float(item['price'])
+        return prices
+    except Exception as e:
+        print(f"❌ 获取价格失败: {e}")
+        return {}
+
+def get_top_gainers_data(top_n=10):
+    """
+    获取 24小时涨幅榜 Top N
+    """
+    # 1. 先获取有效白名单
+    valid_symbols = get_valid_symbols()
+    if not valid_symbols:
+        return []
+
+    # 2. 获取所有 24hr 统计数据
+    url = f"{BASE_URL}/fapi/v1/ticker/24hr"
+    try:
+        response = requests.get(url, timeout=10, proxies=PROXIES)
+        response.raise_for_status()
+        tickers = response.json()
+        
+        filtered_data = []
+        for t in tickers:
+            symbol = t['symbol']
+            if symbol in valid_symbols:
+                try:
+                    # 过滤成交额过小的 (例如小于 1000万 U)
+                    quote_vol = float(t['quoteVolume'])
+                    if quote_vol < 10000000: 
+                        continue
+                        
+                    filtered_data.append({
+                        'symbol': symbol,
+                        'price': float(t['lastPrice']),
+                        'change': float(t['priceChangePercent']),
+                        'volume': quote_vol
+                    })
+                except:
+                    continue
+        
+        # 3. 排序：按涨幅降序
+        df = pd.DataFrame(filtered_data)
+        if df.empty:
+            return []
+            
+        df_sorted = df.sort_values(by='change', ascending=False)
+        return df_sorted.head(top_n).to_dict('records')
+
+    except Exception as e:
+        print(f"❌ 获取行情失败: {e}")
+        return []
+
 # ================= 📉 核心逻辑：5分钟监控 =================
 
 def run_monitor(state):
     positions = state['positions']
     current_balance = state['balance']
     
-    # 如果空仓，直接跳过
     if not positions:
         print("当前无持仓，监控跳过。")
         return
 
-    # 1. 获取最新价格
-    symbols = [p['symbol'] for p in positions]
-    try:
-        tickers = exchange.fetch_tickers(symbols)
-    except Exception as e:
-        print(f"行情获取失败: {e}")
+    # 1. 获取持仓币种的最新价格
+    target_symbols = [p['symbol'] for p in positions]
+    current_prices = get_current_prices(target_symbols)
+    
+    if not current_prices:
+        print("❌ 无法获取最新价格，本次监控中止")
         return
 
     total_unrealized_pnl = 0
@@ -115,12 +207,13 @@ def run_monitor(state):
 
     for pos in positions:
         symbol = pos['symbol']
-        if symbol not in tickers:
-            # 如果获取不到价格，保留原样
+        
+        # 如果获取不到价格，保留原状态
+        if symbol not in current_prices:
             active_positions.append(pos)
             continue
             
-        current_price = tickers[symbol]['close']
+        current_price = current_prices[symbol]
         entry_price = pos['entry_price']
         margin = pos['margin']
         position_value = margin * LEVERAGE
@@ -139,13 +232,13 @@ def run_monitor(state):
             
             current_balance -= margin 
             has_liquidation = True
-            # 爆仓后该仓位移除，不再进入 active_positions
+            # 爆仓后该仓位移除
         else:
             pos['current_price'] = current_price
             pos['unrealized_pnl'] = pnl
             total_unrealized_pnl += pnl
             active_positions.append(pos)
-            # print(f"{symbol}: {pnl:.2f} U") # 调试用，避免日志过长可注释
+            # print(f"{symbol}: 浮动盈亏 {pnl:.2f} U")
 
     # 2. 记录 5分钟 资金曲线
     total_equity = current_balance + total_unrealized_pnl
@@ -153,7 +246,7 @@ def run_monitor(state):
     record = {"Time": get_beijing_time().strftime('%Y-%m-%d %H:%M:%S'), "Total_Equity": round(total_equity, 2)}
     # 记录每个币的明细
     for p in active_positions:
-        sym_name = p['symbol'].split('/')[0]
+        sym_name = p['symbol'] #.replace('USDT', '')
         record[f"{sym_name}_PnL"] = round(p.get('unrealized_pnl', 0), 2)
         
     df = pd.DataFrame([record])
@@ -174,64 +267,65 @@ def run_monitor(state):
 def run_rotation(state):
     print("=== 开始执行每日换仓 (Daily Rotation) ===")
     
-    # 1. 结算旧仓位 (Settlement)
+    # 1. 结算旧仓位
     old_positions = state['positions']
     current_balance = state['balance']
     pnl_today = 0
     
     if old_positions:
         print("正在结算昨日持仓...")
-        symbols = [p['symbol'] for p in old_positions]
-        try:
-            tickers = exchange.fetch_tickers(symbols)
-            for pos in old_positions:
-                symbol = pos['symbol']
-                if symbol in tickers:
-                    exit_price = tickers[symbol]['close']
-                    entry_price = pos['entry_price']
-                    margin = pos['margin']
-                    pos_val = margin * LEVERAGE
-                    
-                    # 盈亏计算
-                    raw_pnl = (entry_price - exit_price) / entry_price * pos_val
-                    # 扣除手续费
-                    fee = pos_val * FEE_RATE
-                    net_pnl = raw_pnl - fee
-                    
-                    pnl_today += net_pnl
-                    current_balance += net_pnl
-                else:
-                    # 如果币下架了，假设按原价平仓（极端情况需人工干预）
-                    print(f"⚠️ {symbol} 无法获取价格，跳过结算")
-        except Exception as e:
-            print(f"❌ 结算失败，停止换仓: {e}")
-            return # 遇到严重网络错误，中止换仓，等待下一个周期
-
+        # 获取旧仓位的当前价格用于平仓
+        old_symbols = [p['symbol'] for p in old_positions]
+        exit_prices = get_current_prices(old_symbols)
+        
+        for pos in old_positions:
+            symbol = pos['symbol']
+            if symbol in exit_prices:
+                exit_price = exit_prices[symbol]
+                entry_price = pos['entry_price']
+                margin = pos['margin']
+                pos_val = margin * LEVERAGE
+                
+                # 盈亏计算 (做空)
+                raw_pnl = (entry_price - exit_price) / entry_price * pos_val
+                # 扣除手续费
+                fee = pos_val * FEE_RATE
+                net_pnl = raw_pnl - fee
+                
+                pnl_today += net_pnl
+                current_balance += net_pnl
+            else:
+                print(f"⚠️ {symbol} 无法获取价格，假设平价平仓")
+    
     print(f"昨日持仓结算盈亏: {pnl_today:.2f} U")
     print(f"最新可用余额: {current_balance:.2f} U")
     
-    # 如果余额归零，停止策略
-    if current_balance <= 10: # 留点余量
+    if current_balance <= 10:
         print("💸 账户余额不足，策略停止。")
         send_wechat_notification("☠️ 策略已破产", f"剩余余额: {current_balance} U")
         return
 
-    # 2. 选新币 (Screening)
+    # 2. 选新币 (Top 10 Gainers)
     print("正在获取涨幅榜 Top 10...")
-    all_tickers = exchange.fetch_tickers()
-    valid_tickers = [d for s, d in all_tickers.items() if '/USDT' in s and 'percentage' in d]
-    sorted_tickers = sorted(valid_tickers, key=lambda x: x['percentage'] if x['percentage'] else -999, reverse=True)
-    top_10 = sorted_tickers[:TOP_N]
+    top_10 = get_top_gainers_data(TOP_N)
     
-    # 3. 开新仓 (Opening)
+    if not top_10:
+        print("❌ 无法获取涨幅榜数据，换仓失败 (保持空仓)")
+        # 保存状态清空持仓，避免数据错乱
+        state['balance'] = current_balance
+        state['positions'] = []
+        save_state(state)
+        return
+
+    # 3. 开新仓
     new_positions = []
     margin_per_coin = current_balance / TOP_N
     msg_lines = []
     
     for t in top_10:
         sym = t['symbol']
-        price = t['close']
-        change = t['percentage']
+        price = t['price']
+        change = t['change']
         
         new_positions.append({
             "symbol": sym,
@@ -262,11 +356,11 @@ def run_rotation(state):
 {chr(10).join(msg_lines)}
     """
     send_wechat_notification(f"📅 策略日报: {current_balance:.0f} U", notify_content)
+    print("✅ 换仓完成")
 
 # ================= 🚀 主程序入口 =================
 
 if __name__ == "__main__":
-    # 确保 data 目录存在
     if not os.path.exists('data'):
         os.makedirs('data')
 
@@ -274,18 +368,10 @@ if __name__ == "__main__":
     now_bj = get_beijing_time()
     today_str = now_bj.strftime('%Y-%m-%d')
     
-    # 逻辑判断：
-    # 如果 [今天还没换过仓] 且 [现在是早上8点 (08:00-08:59)] -> 执行换仓
-    # 否则 -> 执行5分钟监控
-    
     last_rot = state.get('last_rotation_date', '')
     
-    # if today_str != last_rot and now_bj.hour == 8:
-    #     run_rotation(state)
-    # else:
-    #     run_monitor(state)
-    # 强制执行换仓（测试用，测完记得改回去！）
-    # if today_str != last_rot and now_bj.hour == 8: 
-    run_rotation(state)  # <--- 直接调用这个函数，不要 if 判断
-    # else:
-    #    run_monitor(state)
+    # 逻辑判断：每天早上8点 (08:00 - 08:59) 执行且仅执行一次换仓
+    if today_str != last_rot and now_bj.hour == 8:
+        run_rotation(state)
+    else:
+        run_monitor(state)
