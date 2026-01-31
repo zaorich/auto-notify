@@ -1,0 +1,26 @@
+name: Check Binance Top Gainers
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:      # 允许手动运行
+  schedule:
+    - cron: '0 * * * *'   # 每小时运行一次
+
+jobs:
+  fetch-and-print:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    # 因为用了 urllib 标准库，所以这里不需要 pip install 步骤
+
+    - name: Run Market Check
+      run: python binance_top_gainers.py
