@@ -4,14 +4,14 @@ import json
 import time
 import os
 import csv
-import re
+# import re  <-- 不需要正则了，直接注释掉或删除
 from datetime import datetime
 
 # --- 策略核心配置 ---
 PROXY_ADDR = "127.0.0.1:10808"
 STATE_FILE = "strategy_state.json"
 HISTORY_FILE = "strategy_history.csv"
-EQUITY_FILE = "equity_curve.csv"  # [新增] 专门用于画图的净值表
+EQUITY_FILE = "equity_curve.csv"
 
 # 资金参数
 INIT_BALANCE = 1000.0     
@@ -34,10 +34,15 @@ def get_data(opener, url):
         with opener.open(req) as response:
             return json.loads(response.read().decode('utf-8'))
     except Exception as e:
+        # 这里打印错误但不退出，防止单个请求失败影响整体
         print(f"❌ 请求失败 [{url}]: {e}")
         return None
 
 def get_market_rank(opener):
+    """
+    获取涨幅榜 Top 10
+    [修改]：移除了正则过滤，任何字符的币种只要涨幅够高都会被选中
+    """
     url = "https://fapi.binance.com/fapi/v1/ticker/24hr"
     data = get_data(opener, url)
     if not data: return {}, []
@@ -45,12 +50,16 @@ def get_market_rank(opener):
     market_map = {}
     rank_list = []
     current_ts = int(time.time() * 1000)
-    valid_symbol_pattern = re.compile(r'^[A-Z0-9]+$')
     
     for item in data:
         symbol = item['symbol']
-        if not valid_symbol_pattern.match(symbol): continue
-        if current_ts - int(item['closeTime']) > 10 * 60 * 1000: continue
+        
+        # 1. [已删除] 正则过滤逻辑
+        # 只要 API 给数据，我们就接收
+        
+        # 2. 依然保留时间过滤，防止完全没成交的僵尸数据（可选，如果您连僵尸数据也要，可以把这个也注释掉）
+        if current_ts - int(item['closeTime']) > 10 * 60 * 1000:
+            continue
             
         price = float(item['lastPrice'])
         change = float(item['priceChangePercent'])
@@ -61,7 +70,13 @@ def get_market_rank(opener):
     return market_map, rank_list[:POSITIONS_COUNT]
 
 def get_recent_high_price(opener, symbol):
+    """
+    获取过去15分钟K线最高价
+    [关键]：使用 urllib.parse.quote 对 symbol 进行编码，解决中文/特殊字符报错问题
+    """
+    # 将 "我踏马来了USDT" 转换为 "%E6%88%91..."
     safe_symbol = urllib.parse.quote(symbol)
+    
     url = f"https://fapi.binance.com/fapi/v1/klines?symbol={safe_symbol}&interval=15m&limit=1"
     data = get_data(opener, url)
     if data and len(data) > 0:
@@ -69,7 +84,7 @@ def get_recent_high_price(opener, symbol):
     return 0.0
 
 def log_to_csv(record_type, strategy_id, symbol, price, high_price, amount, pos_pnl, equity, note=""):
-    """记录详细操作日志 (strategy_history.csv)"""
+    """记录详细操作日志"""
     file_exists = os.path.isfile(HISTORY_FILE)
     current_time = time.strftime('%Y-%m-%d %H:%M:%S')
     
@@ -84,56 +99,42 @@ def log_to_csv(record_type, strategy_id, symbol, price, high_price, amount, pos_
     except Exception as e:
         print(f"❌ 写入历史CSV失败: {e}")
 
-# --- [新增] 记录净值曲线 ---
 def record_equity_snapshot(data, market_map):
-    """
-    将当前时刻所有策略的净值记录到一行，方便画图
-    """
+    """记录净值曲线"""
     file_exists = os.path.isfile(EQUITY_FILE)
     current_time = time.strftime('%Y-%m-%d %H:%M:%S')
     
-    # 准备一行数据: [Time, S0_Eq, S1_Eq, ... S23_Eq, Total_Eq]
     row_data = [current_time]
     total_equity = 0.0
     
-    # 遍历 0 到 23 号策略
     for i in range(24):
         s_id = str(i)
         strategy = data[s_id]
+        equity = strategy['balance'] 
         
-        # 计算该策略实时净值
-        equity = strategy['balance'] # 基础余额
-        
-        # 加上持仓浮动盈亏
         if strategy['positions']:
             for pos in strategy['positions']:
                 symbol = pos['symbol']
                 entry = pos['entry_price']
                 amount = pos['amount']
-                # 使用当前价计算净值 (画图用当前价即可，不用最高价)
                 curr = market_map.get(symbol, entry)
                 pnl = (entry - curr) * amount
                 equity += pnl
         
-        # 如果已经爆仓归零
         if equity < 0: equity = 0
-            
         row_data.append(round(equity, 2))
         total_equity += equity
         
-    # 最后加上总净值
     row_data.append(round(total_equity, 2))
     
     try:
         with open(EQUITY_FILE, 'a', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
-            # 如果是新文件，写入表头: Time, S_0, S_1 ... S_23, Total
             if not file_exists:
                 headers = ["Time"] + [f"S_{i}" for i in range(24)] + ["Total"]
                 writer.writerow(headers)
-            
             writer.writerow(row_data)
-        print("📈 [图表数据] 已更新净值曲线数据 (equity_curve.csv)")
+        print("📈 [图表数据] 已更新净值曲线数据")
     except Exception as e:
         print(f"❌ 写入净值CSV失败: {e}")
 
@@ -173,6 +174,7 @@ def check_risk_management(opener, data, market_map):
             amount = pos['amount']
             
             curr = market_map.get(symbol, entry)
+            # 这里调用了 quote 处理过的 K 线请求函数
             high_15m = get_recent_high_price(opener, symbol)
             risk_price = max(curr, high_15m) if high_15m > 0 else curr
             
@@ -185,11 +187,9 @@ def check_risk_management(opener, data, market_map):
 
         equity = wallet_balance + total_unrealized_pnl
         
-        # 记录监控日志
         for d in details:
             log_to_csv("MONITOR", s_id, d['symbol'], d['curr'], d['high'], d['amount'], d['pnl'], equity, "全仓监控")
 
-        # 爆仓判断
         if equity <= 0:
             print(f"💥 策略 {s_id} 触发全仓爆仓! 净值归零")
             for d in details:
@@ -207,10 +207,10 @@ def execute_rotation(opener, data, market_map, top_10):
 
     print(f"\n🔄 [执行] 策略 {current_hour} 轮动逻辑...")
     
-    # 平旧仓
     total_close_pnl = 0
     wallet_balance = strategy['balance']
     
+    # 1. 平仓逻辑
     if wallet_balance > 0 and strategy['positions']:
         for pos in strategy['positions']:
             symbol = pos['symbol']
@@ -227,7 +227,7 @@ def execute_rotation(opener, data, market_map, top_10):
         strategy['balance'] += total_close_pnl
         strategy['positions'] = []
     
-    # 开新仓
+    # 2. 开仓逻辑
     current_equity = strategy['balance']
     
     if current_equity < 100:
@@ -330,6 +330,7 @@ def report_to_wechat(opener, data, market_map):
     
     print(f"\n{'='*20} 📢 微信通知内容 (Log) {'='*20}")
     print(f"【标题】: {title}")
+    print(f"【正文】:\n{description}")
     print(f"{'='*55}\n")
 
     url = f"https://sctapi.ftqq.com/{SERVERCHAN_KEY}.send"
@@ -354,7 +355,7 @@ if __name__ == "__main__":
         # 2. 轮动开仓
         has_rotated = execute_rotation(opener, data, market_map, top_10)
         
-        # 3. [新增] 记录净值曲线数据 (无论是否开仓，每15分钟都记录一次，让曲线更平滑)
+        # 3. 记录净值曲线
         record_equity_snapshot(data, market_map)
         
         save_state(data)
