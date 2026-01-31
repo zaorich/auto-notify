@@ -1,14 +1,14 @@
-name: Check Binance Top Gainers
+name: Check Binance via Proxy
 
 on:
   push:
     branches: [ "main" ]
-  workflow_dispatch:      # 允许手动运行
+  workflow_dispatch:
   schedule:
-    - cron: '0 * * * *'   # 每小时运行一次
+    - cron: '0 * * * *'
 
 jobs:
-  fetch-and-print:
+  proxy-and-run:
     runs-on: ubuntu-latest
 
     steps:
@@ -20,7 +20,27 @@ jobs:
       with:
         python-version: '3.10'
 
-    # 因为用了 urllib 标准库，所以这里不需要 pip install 步骤
+    # --- 新增步骤：安装并启动 Xray 代理 ---
+    - name: Start Xray Proxy
+      run: |
+        # 1. 下载 Xray Core
+        wget https://github.com/XTLS/Xray-core/releases/download/v1.8.4/Xray-linux-64.zip
+        unzip Xray-linux-64.zip
+        
+        # 2. 赋予执行权限
+        chmod +x xray
+        
+        # 3. 后台启动 xray，使用仓库里的 config.json
+        # nohup 让它在后台运行，& 表示异步
+        nohup ./xray -config config.json > /dev/null 2>&1 &
+        
+        # 4. 等待几秒确保连接建立
+        sleep 5
+        
+        # 5. (可选) 测试一下代理是否通了，显示当前 IP 归属地
+        echo "Testing Proxy IP..."
+        curl -x http://127.0.0.1:10808 -s http://ip-api.com/line?fields=country || echo "Proxy check failed"
 
+    # --- 运行 Python 脚本 ---
     - name: Run Market Check
       run: python binance_top_gainers.py
