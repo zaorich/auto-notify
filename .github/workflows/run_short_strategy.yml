@@ -39,11 +39,18 @@ jobs:
         git config --global user.name "StrategyBot"
         git config --global user.email "bot@github.com"
         
-        # 修改这里：添加 equity_curve.csv
+        # 1. 先把生成的文件添加到暂存区
         git add strategy_state.json strategy_history.csv equity_curve.csv
         
+        # 2. 检查是否有变化
         if [[ -n $(git status -s) ]]; then
+          # 3. 先提交到本地
           git commit -m "📊 Update Data & Equity Curve [$(date)]"
+          
+          # 4. 【核心修复】拉取远程最新代码并变基（解决冲突的关键）
+          git pull --rebase origin main
+          
+          # 5. 推送
           git push
         else
           echo "No changes."
