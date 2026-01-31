@@ -11,10 +11,6 @@ USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTM
 # 只有最近 10 分钟内有成交的合约才会被统计，过滤掉僵尸交易对
 FUTURES_TIME_TOLERANCE = 10 * 60 * 1000 
 
-# 任务2 (Wallet/现货) 时间阈值：24小时
-# 只要最近 24 小时内有成交就算有效，为了匹配更多新币
-SPOT_TIME_TOLERANCE = 24 * 60 * 60 * 1000 
-
 def format_duration(timestamp_ms):
     """将时间戳转换为 '已上市 X天' 的格式"""
     if not timestamp_ms or timestamp_ms <= 0:
@@ -94,7 +90,7 @@ def get_futures_gainers(opener):
         print(f"❌ 任务 1 失败: {e}")
 
 def get_wallet_gainers(opener):
-    """任务2: Wallet Token 列表涨幅榜 (宽松过滤: 24小时)"""
+    """任务2: Wallet Token 列表涨幅榜 (无时间过滤)"""
     token_list_url = "https://www.binance.com/bapi/defi/v1/public/wallet-direct/buw/wallet/cex/alpha/all/token/list"
     spot_ticker_url = "https://api.binance.com/api/v3/ticker/24hr"
     
@@ -125,7 +121,6 @@ def get_wallet_gainers(opener):
         
         # --- 步骤 C: 匹配与筛选 ---
         matched_data = []
-        current_time_ms = int(time.time() * 1000)
         
         for item in spot_data:
             symbol = item['symbol']
@@ -135,10 +130,8 @@ def get_wallet_gainers(opener):
             base_asset = symbol[:-4] 
             if base_asset not in wallet_meta: continue
 
-            # --- 宽松过滤逻辑 (24h) ---
-            if current_time_ms - int(item['closeTime']) > SPOT_TIME_TOLERANCE:
-                continue
-
+            # [修改点] 这里不再检查 closeTime，所有数据默认有效
+            
             l_time_ms = wallet_meta[base_asset]
             duration_str, date_str = format_duration(l_time_ms)
 
@@ -154,7 +147,7 @@ def get_wallet_gainers(opener):
         # --- 步骤 D: 排序输出 ---
         top_10 = sorted(matched_data, key=lambda x: x['change'], reverse=True)[:10]
         
-        print(f"\n[结果] 筛选出 {len(matched_data)} 个活跃交易对 (24h内有成交)。\n")
+        print(f"\n[结果] 筛选出 {len(matched_data)} 个交易对 (无时间过滤)。\n")
         
         header = f"{'币种':<10} {'价格':<10} {'24H涨幅':<10} {'上市日期':<12} {'已上市时长'}"
         print(header)
