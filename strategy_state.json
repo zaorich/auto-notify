@@ -137,8 +137,79 @@
   },
   "13": {
     "balance": 1000.0,
-    "positions": [],
-    "last_trade_date": ""
+    "positions": [
+      {
+        "symbol": "SYNUSDT",
+        "entry_price": 0.10315,
+        "margin": 100.0,
+        "amount": 2908.38584585555,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "\u6211\u8e0f\u9a6c\u6765\u4e86USDT",
+        "entry_price": 0.039408,
+        "margin": 100.0,
+        "amount": 7612.6674786845315,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "CLANKERUSDT",
+        "entry_price": 42.62,
+        "margin": 100.0,
+        "amount": 7.0389488503050215,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "BULLAUSDT",
+        "entry_price": 0.12248,
+        "margin": 100.0,
+        "amount": 2449.379490529066,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "CYSUSDT",
+        "entry_price": 0.233,
+        "margin": 100.0,
+        "amount": 1287.5536480686694,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "XMRUSDT",
+        "entry_price": 486.03,
+        "margin": 100.0,
+        "amount": 0.6172458490216653,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "MAGMAUSDT",
+        "entry_price": 0.10559,
+        "margin": 100.0,
+        "amount": 2841.178141869495,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "RIFUSDT",
+        "entry_price": 0.03793,
+        "margin": 100.0,
+        "amount": 7909.306617453203,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "XVSUSDT",
+        "entry_price": 3.484,
+        "margin": 100.0,
+        "amount": 86.10792192881745,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "TAGUSDT",
+        "entry_price": 0.0004234,
+        "margin": 100.0,
+        "amount": 708549.8346717053,
+        "leverage": 3.0
+      }
+    ],
+    "last_trade_date": "2026-01-31"
   },
   "14": {
     "balance": 1000.0,
