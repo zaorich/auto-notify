@@ -148,9 +148,90 @@
   },
   "11": {
     "balance": 1000.0,
-    "positions": [],
+    "positions": [
+      {
+        "symbol": "SYNUSDT",
+        "entry_price": 0.10983,
+        "margin": 10.0,
+        "amount": 273.1494127287626,
+        "leverage": 3.0,
+        "open_time": "2026-01-31 11:22"
+      },
+      {
+        "symbol": "\u6211\u8e0f\u9a6c\u6765\u4e86USDT",
+        "entry_price": 0.042429,
+        "margin": 10.0,
+        "amount": 707.0635650144948,
+        "leverage": 3.0,
+        "open_time": "2026-01-31 11:22"
+      },
+      {
+        "symbol": "BULLAUSDT",
+        "entry_price": 0.13607,
+        "margin": 10.0,
+        "amount": 220.47475564047917,
+        "leverage": 3.0,
+        "open_time": "2026-01-31 11:22"
+      },
+      {
+        "symbol": "CYSUSDT",
+        "entry_price": 0.2265,
+        "margin": 10.0,
+        "amount": 132.4503311258278,
+        "leverage": 3.0,
+        "open_time": "2026-01-31 11:22"
+      },
+      {
+        "symbol": "ENSOUSDT",
+        "entry_price": 1.5056,
+        "margin": 10.0,
+        "amount": 19.925611052072263,
+        "leverage": 3.0,
+        "open_time": "2026-01-31 11:22"
+      },
+      {
+        "symbol": "CLANKERUSDT",
+        "entry_price": 38.96,
+        "margin": 10.0,
+        "amount": 0.7700205338809035,
+        "leverage": 3.0,
+        "open_time": "2026-01-31 11:22"
+      },
+      {
+        "symbol": "XVSUSDT",
+        "entry_price": 3.486,
+        "margin": 10.0,
+        "amount": 8.605851979345955,
+        "leverage": 3.0,
+        "open_time": "2026-01-31 11:22"
+      },
+      {
+        "symbol": "XMRUSDT",
+        "entry_price": 488.77,
+        "margin": 10.0,
+        "amount": 0.06137856251406592,
+        "leverage": 3.0,
+        "open_time": "2026-01-31 11:22"
+      },
+      {
+        "symbol": "SKRUSDT",
+        "entry_price": 0.018794,
+        "margin": 10.0,
+        "amount": 1596.254123656486,
+        "leverage": 3.0,
+        "open_time": "2026-01-31 11:22"
+      },
+      {
+        "symbol": "INITUSDT",
+        "entry_price": 0.1013,
+        "margin": 10.0,
+        "amount": 296.15004935834156,
+        "leverage": 3.0,
+        "open_time": "2026-01-31 11:22"
+      }
+    ],
     "history": [],
-    "last_trade_date": ""
+    "last_trade_date": "2026-01-31"
   },
   "12": {
     "balance": 1000.0,
