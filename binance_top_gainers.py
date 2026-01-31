@@ -1,41 +1,47 @@
 import urllib.request
 import json
 import time
+import os
 
 def check_market():
-    # 币安 U本位合约 24hr 价格变动接口
+    # 既然有了日本代理，我们直接用回币安的官方接口
     url = "https://fapi.binance.com/fapi/v1/ticker/24hr"
     
+    # 设置代理地址 (对应 config.json 里的 inbounds 端口 10808)
+    proxy_addr = "127.0.0.1:10808"
+    
     try:
-        # 添加 User-Agent 伪装浏览器
+        # 配置代理 Handler
+        proxy_handler = urllib.request.ProxyHandler({
+            'http': f'http://{proxy_addr}',
+            'https': f'http://{proxy_addr}'
+        })
+        opener = urllib.request.build_opener(proxy_handler)
+        
+        # 伪装 Header
         headers = {'User-Agent': 'Mozilla/5.0'}
         req = urllib.request.Request(url, headers=headers)
         
-        with urllib.request.urlopen(req) as response:
+        # 使用带代理的 opener 发送请求
+        with opener.open(req) as response:
             data = json.loads(response.read().decode('utf-8'))
         
-        # 数据处理：将涨幅转为浮点数
+        # --- 下面是原本的数据处理逻辑 ---
+        
         for item in data:
             item['priceChangePercent'] = float(item['priceChangePercent'])
             
-        # 排序：按涨幅降序
         sorted_data = sorted(data, key=lambda x: x['priceChangePercent'], reverse=True)
-        
-        # 取前10
         top_10 = sorted_data[:10]
         
-        # 输出日志
-        print(f"\n=== 币安合约 24H 涨幅榜 TOP 10 ===")
+        print(f"\n=== 币安合约 24H 涨幅榜 (代理模式: 日本) ===")
         print(f"时间: {time.strftime('%Y-%m-%d %H:%M:%S')} (UTC)\n")
-        
-        # 格式化输出表头
         print(f"{'交易对':<20} {'最新价格':<15} {'24H涨幅':<10}")
         print("-" * 50)
         
         for item in top_10:
             symbol = item['symbol']
             price = float(item['lastPrice'])
-            # 这里的格式说明：price 用 g (通用格式) 去掉多余零，change 用 .2f 保留两位小数
             print(f"{symbol:<20} {price:<15g} {item['priceChangePercent']:+.2f}%")
             
     except Exception as e:
