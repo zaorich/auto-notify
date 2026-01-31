@@ -353,5 +353,5 @@ if __name__ == "__main__":
         
         save_state(data)
         
-        if has_rotated:
-            report_to_wechat(opener, data, market_map)
+        #if has_rotated:
+        report_to_wechat(opener, data, market_map)
