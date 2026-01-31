@@ -1,8 +1,14 @@
 name: 24h Short Strategy Bot
 
+#on:
+#  schedule:
+#    - cron: '*/15 * * * *'
+#  workflow_dispatch:
+
 on:
   schedule:
-    - cron: '*/15 * * * *'
+    # 每小时的第0、15、30分钟各运行一次（例如 12:00, 12:20, 12:40）
+    - cron: '0,15,30,45 * * * *'
   workflow_dispatch:
 
 jobs:
