@@ -31,7 +31,7 @@ jobs:
     # --- 修改点：注入 Server酱 Key ---
     - name: Run Strategy Script
       env:
-        SERVERCHAN_KEY: ${{ secrets.SERVER_JIANG_KEY }}  # 这里把 Secret 传给 Python
+        SERVERCHAN_KEY: SCT281228TBF1BQU3KUJ4vLRkykhzIE80e  # 这里把 Secret 传给 Python
       run: python short_top10_gainers_3x_rotation.py
 
     - name: Save Data
