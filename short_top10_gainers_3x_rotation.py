@@ -37,6 +37,7 @@ def get_data(opener, url):
         return None
 
 def get_market_rank(opener):
+    """获取涨幅榜 Top 10 (含正则过滤)"""
     url = "https://fapi.binance.com/fapi/v1/ticker/24hr"
     data = get_data(opener, url)
     if not data: return {}, []
@@ -60,6 +61,7 @@ def get_market_rank(opener):
     return market_map, rank_list[:POSITIONS_COUNT]
 
 def get_recent_high_price(opener, symbol):
+    """获取过去15分钟最高价"""
     safe_symbol = urllib.parse.quote(symbol)
     url = f"https://fapi.binance.com/fapi/v1/klines?symbol={safe_symbol}&interval=15m&limit=1"
     data = get_data(opener, url)
@@ -69,26 +71,19 @@ def get_recent_high_price(opener, symbol):
 
 def log_to_csv(record_type, strategy_id, symbol, price, high_price, amount, pos_pnl, equity, note=""):
     """
-    CSV 记录函数
-    Current_Price: 当前交易对价格
-    High_Price: 15分钟最高价(用于回测风控)
-    Pos_PnL: 单个仓位的盈亏
-    Equity: 整个策略的当前净值(余额+所有盈亏)
+    CSV 记录函数 (同时输出详细日志到控制台)
     """
     file_exists = os.path.isfile(HISTORY_FILE)
     current_time = time.strftime('%Y-%m-%d %H:%M:%S')
     
-    # 控制台日志格式化对齐
-    print(f"📝 [CSV] {record_type:<10} 策略{strategy_id:<2} {symbol:<8} 价:{price:<8g} 仓位盈亏:{pos_pnl:+.2f} 策略净值:{equity:.2f}U | {note}")
+    # [关键] 控制台日志输出
+    print(f"📝 [CSV] {record_type:<10} 策略{strategy_id:<2} {symbol:<8} 价:{price:<8g} 仓位盈亏:{pos_pnl:+.2f} 净值:{equity:.2f} | {note}")
 
     try:
         with open(HISTORY_FILE, 'a', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
-            # CSV 表头
             if not file_exists:
                 writer.writerow(["Time", "Strategy_ID", "Type", "Symbol", "Price", "15m_High", "Amount", "Pos_PnL", "Strategy_Equity", "Note"])
-            
-            # 写入数据行
             writer.writerow([current_time, strategy_id, record_type, symbol, price, high_price, amount, pos_pnl, equity, note])
     except Exception as e:
         print(f"❌ 写入CSV失败: {e}")
@@ -98,7 +93,7 @@ def load_state():
         data = {}
         for i in range(24):
             data[str(i)] = {
-                "balance": INIT_BALANCE, # 这里的 balance 指"钱包余额"(已实现盈亏)
+                "balance": INIT_BALANCE,
                 "positions": [],
                 "last_trade_date": ""
             }
@@ -123,56 +118,37 @@ def check_risk_management(opener, data, market_map):
         total_unrealized_pnl = 0.0
         details = []
 
-        # 1. 计算全仓总盈亏 (基于15分钟最高价，模拟最坏情况)
+        # 1. 计算全仓总盈亏
         for pos in positions:
             symbol = pos['symbol']
             entry = pos['entry_price']
             amount = pos['amount']
             
-            # 获取当前行情
             curr = market_map.get(symbol, entry)
-            # 获取过去15分钟最高价 (插针)
             high_15m = get_recent_high_price(opener, symbol)
-            # 风控计算价格：取两者较大值，确保捕捉到插针爆仓
             risk_price = max(curr, high_15m) if high_15m > 0 else curr
             
-            # 做空浮动盈亏 = (开仓价 - 风险价格) * 数量
             pnl = (entry - risk_price) * amount
             total_unrealized_pnl += pnl
             
-            # 暂存明细，用于后面记录
             details.append({
-                'symbol': symbol,
-                'curr': curr,
-                'high': risk_price,
-                'amount': amount,
-                'pnl': pnl
+                'symbol': symbol, 'curr': curr, 'high': risk_price, 'amount': amount, 'pnl': pnl
             })
 
-        # 2. 计算当前动态净值 (Equity)
+        # 2. 计算动态净值 (Equity)
         equity = wallet_balance + total_unrealized_pnl
         
-        # 3. 记录监控日志 (CSV)
-        # 为避免日志过于冗长，这里只记录每单的状况，但 Equity 是整体的
+        # 3. 记录日志 (Monitor)
         for d in details:
             log_to_csv("MONITOR", s_id, d['symbol'], d['curr'], d['high'], d['amount'], d['pnl'], equity, "全仓监控")
 
         # 4. 全仓爆仓判断
-        # 如果 净值 <= 0，则该策略下所有仓位全部强平
         if equity <= 0:
-            print(f"💥 策略 {s_id} 触发全仓爆仓! 净值归零 ({equity:.2f}U)")
-            
-            # 记录爆仓日志
+            print(f"💥 策略 {s_id} 触发全仓爆仓! 净值归零")
             for d in details:
                 log_to_csv("LIQUIDATION", s_id, d['symbol'], d['high'], d['high'], d['amount'], d['pnl'], 0, "全仓强平")
-            
-            # 重置策略状态
             strategy['balance'] = 0
-            strategy['positions'] = [] # 清空所有持仓
-            
-        else:
-            # 安全，无需操作
-            pass
+            strategy['positions'] = []
 
 def execute_rotation(opener, data, market_map, top_10):
     current_hour = str(datetime.utcnow().hour)
@@ -184,11 +160,10 @@ def execute_rotation(opener, data, market_map, top_10):
 
     print(f"\n🔄 [执行] 策略 {current_hour} 轮动逻辑...")
     
-    # 1. 平掉旧仓位 (全仓模式下，按当前价结算，更新钱包余额)
+    # 1. 平旧仓
     total_close_pnl = 0
     wallet_balance = strategy['balance']
     
-    # 如果此时已经爆仓归零了，就没法平仓了
     if wallet_balance > 0 and strategy['positions']:
         for pos in strategy['positions']:
             symbol = pos['symbol']
@@ -199,25 +174,20 @@ def execute_rotation(opener, data, market_map, top_10):
             pnl = (entry - exit_price) * amount
             total_close_pnl += pnl
             
-            # 平仓时的净值 = 平仓前的钱包余额 + 该单盈亏 (近似)
-            # 为了CSV好看，我们算出平仓后的累计净值
+            # 临时净值用于记录
             temp_equity = wallet_balance + total_close_pnl
-            
             log_to_csv("CLOSE", current_hour, symbol, exit_price, exit_price, amount, pnl, temp_equity, "轮动平仓")
 
         strategy['balance'] += total_close_pnl
         strategy['positions'] = []
     
     # 2. 开新仓
-    # 更新后的钱包余额
     current_equity = strategy['balance']
     
     if current_equity < 100:
         log_to_csv("SKIP", current_hour, "ALL", 0, 0, 0, 0, current_equity, "净值不足100U")
     else:
-        # 全仓模式：资金也是均分
         margin_per_coin = current_equity / POSITIONS_COUNT
-        
         top10_str = "|".join([x['symbol'] for x in top_10])
         log_to_csv("INFO", current_hour, "TOP10_LIST", 0, 0, 0, 0, current_equity, top10_str)
 
@@ -250,7 +220,6 @@ def report_to_wechat(opener, data, market_map):
     max_profit = -999999
     best_strategy = ""
     
-    # 表格头: ID | 净值 | 盈亏 | 持仓
     md_table = "| ID | 净值(U) | 盈亏 | 持仓 |\n| :---: | :---: | :---: | :---: |\n"
     detail_text = ""
     
@@ -260,7 +229,6 @@ def report_to_wechat(opener, data, market_map):
         wallet_bal = info['balance']
         positions = info['positions']
         
-        # 计算该策略当前的浮动盈亏总和
         strategy_floating_pnl = 0
         pos_details = []
         
@@ -280,10 +248,8 @@ def report_to_wechat(opener, data, market_map):
                 warn = "⚠️" if high_15m > entry * 1.05 else ""
                 pos_details.append(f"- `{symbol:<6} 开:{entry:<8g} 现:{curr:<8g} 盈亏:{pnl:+.1f}U {warn}`")
 
-        # 全仓净值 = 钱包余额 + 浮动盈亏
         equity = wallet_bal + strategy_floating_pnl
         total_equity += equity
-        
         net_pnl = equity - INIT_BALANCE
         
         if net_pnl > max_profit:
@@ -316,17 +282,19 @@ def report_to_wechat(opener, data, market_map):
 {detail_text}
     """
     
-    print(f"\n{'='*20} 📢 微信通知预览 {'='*20}")
+    # --- [关键修改] 在日志中完整打印发送内容 ---
+    print(f"\n{'='*20} 📢 微信通知内容 (Log) {'='*20}")
     print(f"【标题】: {title}")
-    # print(description) # 内容太长，控制台不打印全部正文，只发微信
+    print(f"【正文】:\n{description}")
     print(f"{'='*55}\n")
+    # ----------------------------------------
 
     url = f"https://sctapi.ftqq.com/{SERVERCHAN_KEY}.send"
     params = {'title': title, 'desp': description}
     try:
         req = urllib.request.Request(url, data=urllib.parse.urlencode(params).encode('utf-8'), method='POST')
         with urllib.request.urlopen(req) as f:
-            print("✅ 微信通知已发送")
+            print("✅ 微信推送请求已发送")
     except Exception as e:
         print(f"❌ 微信发送失败: {e}")
 
