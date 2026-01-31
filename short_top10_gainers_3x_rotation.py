@@ -67,13 +67,8 @@ def get_recent_high_price(opener, symbol):
         return float(data[0][2])
     return 0.0
 
-# --- [新增] 核心计算函数 (统一口径) ---
 def calculate_strategy_equity(strategy, market_map, opener=None, use_high_price=False):
-    """
-    计算单个策略的当前动态净值
-    :param use_high_price: True则使用15m最高价(用于风控), False则使用现价(用于报表)
-    :return: (equity, details_list)
-    """
+    """核心计算函数"""
     wallet_balance = strategy['balance']
     positions = strategy['positions']
     
@@ -86,21 +81,16 @@ def calculate_strategy_equity(strategy, market_map, opener=None, use_high_price=
             entry = float(pos['entry_price'])
             amount = float(pos['amount'])
             
-            # 获取价格
             curr = market_map.get(symbol, entry)
-            
             calc_price = curr
             warn_msg = ""
             
-            # 如果需要插针检测 (Opener 不为空且指定了 use_high_price)
             if opener and use_high_price:
                 high_15m = get_recent_high_price(opener, symbol)
                 if high_15m > 0:
                     calc_price = max(curr, high_15m)
                     if high_15m > entry * 1.05: warn_msg = "⚠️"
 
-            # 这里的 calc_price: 报表时是现价，风控时是插针价
-            # 做空盈亏 = (开仓 - 结算) * 数量
             pnl = (entry - calc_price) * amount
             total_unrealized_pnl += pnl
             
@@ -141,7 +131,6 @@ def record_equity_snapshot(data, market_map):
     
     for i in range(24):
         s_id = str(i)
-        # 使用统一函数计算 (False表示使用现价画图)
         eq, _ = calculate_strategy_equity(data[s_id], market_map, opener=None, use_high_price=False)
         if eq < 0: eq = 0
         row_data.append(round(eq, 2))
@@ -183,14 +172,11 @@ def check_risk_management(opener, data, market_map):
         strategy = data[s_id]
         if not strategy['positions']: continue
 
-        # 调用核心计算函数 (use_high_price=True, 开启插针检测)
         equity, details = calculate_strategy_equity(strategy, market_map, opener, use_high_price=True)
         
-        # 记录监控日志
         for d in details:
             log_to_csv("MONITOR", s_id, d['symbol'], d['curr'], d['calc_price'], d['amount'], d['pnl'], equity, "全仓监控")
 
-        # 爆仓判断
         if equity <= 0:
             print(f"💥 策略 {s_id} 触发全仓爆仓! 净值归零")
             for d in details:
@@ -208,7 +194,6 @@ def execute_rotation(opener, data, market_map, top_10):
 
     print(f"\n🔄 [执行] 策略 {current_hour} 轮动逻辑...")
     
-    # 1. 平仓逻辑
     total_close_pnl = 0
     wallet_balance = strategy['balance']
     
@@ -222,14 +207,12 @@ def execute_rotation(opener, data, market_map, top_10):
             pnl = (entry - exit_price) * amount
             total_close_pnl += pnl
             
-            # 临时净值用于记录
             temp_equity = wallet_balance + total_close_pnl
             log_to_csv("CLOSE", current_hour, symbol, exit_price, exit_price, amount, pnl, temp_equity, "轮动平仓")
 
         strategy['balance'] += total_close_pnl
         strategy['positions'] = []
     
-    # 2. 开仓逻辑
     current_equity = strategy['balance']
     
     if current_equity < 100:
@@ -264,7 +247,7 @@ def report_to_wechat(opener, data, market_map):
         print("⚠️ 未配置 SERVERCHAN_KEY，跳过通知")
         return
         
-    print("\n📤 正在生成全仓净值报告 (使用统一计算函数)...")
+    print("\n📤 正在生成极简报告...")
     
     total_equity = 0
     total_init = 24 * INIT_BALANCE
@@ -277,11 +260,8 @@ def report_to_wechat(opener, data, market_map):
     for i in range(24):
         s_id = str(i)
         
-        # [关键] 调用同一个计算函数，使用现价 (use_high_price=False)
-        # 这样能保证和 CSV 里的逻辑、数据源完全一致
         equity, details = calculate_strategy_equity(data[s_id], market_map, opener, use_high_price=False)
         
-        # 累加总净值
         total_equity += equity
         net_pnl = equity - INIT_BALANCE
         
@@ -294,14 +274,23 @@ def report_to_wechat(opener, data, market_map):
         md_table += f"| {s_id} | {equity:.0f} | {icon}{net_pnl:+.0f} | {pos_len} |\n"
 
         if pos_len > 0:
-            detail_text += f"\n🔷 **策略 {s_id} 全仓详情** (净值:{equity:.1f}U):\n"
+            detail_text += f"\n🔷 **策略{s_id}** (净:{equity:.0f}U):\n"
+            
+            simple_items = []
             for d in details:
-                # 打印详细 debug 信息到控制台，方便你核对
-                print(f"   Debug {s_id}: {d['symbol']} 开:{d['entry']} 现:{d['curr']} 量:{d['amount']:.4f} PnL:{d['pnl']:.2f}")
+                # 打印Debug方便核对
+                print(f"   Debug {s_id}: {d['symbol']} PnL:{d['pnl']:.2f}")
                 
-                # 微信消息格式
-                warn = d.get('warn', '')
-                detail_text += f"- `{d['symbol']:<6} 开:{d['entry']:<8g} 现:{d['curr']:<8g} 盈亏:{d['pnl']:+.1f}U {warn}`\n"
+                warn_mark = "⚠️" if d.get('warn') else ""
+                
+                # --- [修改点] 移除 USDT 后缀 ---
+                short_symbol = d['symbol'].replace("USDT", "")
+                
+                # 格式: BTC(+2.5)
+                item_str = f"{short_symbol}({d['pnl']:+.1f}){warn_mark}"
+                simple_items.append(item_str)
+            
+            detail_text += ", ".join(simple_items) + "\n"
 
     total_pnl = total_equity - total_init
     total_pnl_pct = (total_pnl / total_init) * 100
@@ -318,11 +307,11 @@ def report_to_wechat(opener, data, market_map):
 ---
 {md_table}
 ---
-### 📝 持仓明细
+### 📝 持仓概览
 {detail_text}
     """
     
-    print(f"\n{'='*20} 📢 微信通知内容 {'='*20}")
+    print(f"\n{'='*20} 📢 微信通知预览 {'='*20}")
     print(f"标题: {title}")
     print("正文已生成，准备发送...")
 
@@ -341,16 +330,9 @@ if __name__ == "__main__":
     
     if market_map:
         data = load_state()
-        
-        # 1. 风控 (使用 High Price 检测)
         check_risk_management(opener, data, market_map)
-        
-        # 2. 轮动
         has_rotated = execute_rotation(opener, data, market_map, top_10)
-        
-        # 3. 记录净值曲线 (使用 Current Price)
         record_equity_snapshot(data, market_map)
-        
         save_state(data)
         
         if has_rotated:
