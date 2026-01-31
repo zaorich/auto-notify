@@ -2,7 +2,7 @@ name: 24h Short Strategy Bot
 
 on:
   schedule:
-    - cron: '*/15 * * * *'  # 每15分钟
+    - cron: '*/15 * * * *'
   workflow_dispatch:
 
 jobs:
@@ -28,18 +28,19 @@ jobs:
         nohup ./xray -config config.json > /dev/null 2>&1 &
         sleep 5
 
+    # --- 修改点：注入 Server酱 Key ---
     - name: Run Strategy Script
+      env:
+        SERVERCHAN_KEY: ${{ secrets.SERVER_JIANG_KEY }}  # 这里把 Secret 传给 Python
       run: python short_top10_gainers_3x_rotation.py
 
-    - name: Save Data (JSON State + CSV History)
+    - name: Save Data
       run: |
         git config --global user.name "StrategyBot"
         git config --global user.email "bot@github.com"
         
-        # 添加两个文件
         git add strategy_state.json strategy_history.csv
         
-        # 只有当文件有变化时才提交
         if [[ -n $(git status -s) ]]; then
           git commit -m "📊 Update: Position Check & History [$(date)]"
           git push
