@@ -821,8 +821,79 @@
   },
   "22": {
     "balance": 1000.0,
-    "positions": [],
-    "last_trade_date": ""
+    "positions": [
+      {
+        "symbol": "BULLAUSDT",
+        "entry_price": 0.27193,
+        "margin": 100.0,
+        "amount": 1103.2250946934873,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "CYSUSDT",
+        "entry_price": 0.2898,
+        "margin": 100.0,
+        "amount": 1035.1966873706003,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "\u6211\u8e0f\u9a6c\u6765\u4e86USDT",
+        "entry_price": 0.0396,
+        "margin": 100.0,
+        "amount": 7575.757575757575,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "CLANKERUSDT",
+        "entry_price": 44.17,
+        "margin": 100.0,
+        "amount": 6.7919402309259675,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "SENTUSDT",
+        "entry_price": 0.04136,
+        "margin": 100.0,
+        "amount": 7253.384912959381,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "C98USDT",
+        "entry_price": 0.0228,
+        "margin": 100.0,
+        "amount": 13157.894736842105,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "FHEUSDT",
+        "entry_price": 0.15246,
+        "margin": 100.0,
+        "amount": 1967.729240456513,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "AWEUSDT",
+        "entry_price": 0.054,
+        "margin": 100.0,
+        "amount": 5555.555555555556,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "GWEIUSDT",
+        "entry_price": 0.042031,
+        "margin": 100.0,
+        "amount": 7137.588922461992,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "ELSAUSDT",
+        "entry_price": 0.12817,
+        "margin": 100.0,
+        "amount": 2340.641335725989,
+        "leverage": 3.0
+      }
+    ],
+    "last_trade_date": "2026-01-31"
   },
   "23": {
     "balance": 1000.0,
