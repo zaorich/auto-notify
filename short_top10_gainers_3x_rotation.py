@@ -4,7 +4,6 @@ import json
 import time
 import os
 import csv
-# import re
 from datetime import datetime
 
 # --- 策略核心配置 ---
@@ -278,18 +277,17 @@ def report_to_wechat(opener, data, market_map):
             
             simple_items = []
             for d in details:
-                # 打印Debug方便核对
-                print(f"   Debug {s_id}: {d['symbol']} PnL:{d['pnl']:.2f}")
-                
+                # 警告标记
                 warn_mark = "⚠️" if d.get('warn') else ""
                 
-                # --- [修改点] 移除 USDT 后缀 ---
+                # --- [重点] 移除 USDT 并格式化为 币名(盈亏) ---
                 short_symbol = d['symbol'].replace("USDT", "")
                 
-                # 格式: BTC(+2.5)
+                # 示例格式: SYN(-2.0)
                 item_str = f"{short_symbol}({d['pnl']:+.1f}){warn_mark}"
                 simple_items.append(item_str)
             
+            # 使用逗号横向连接
             detail_text += ", ".join(simple_items) + "\n"
 
     total_pnl = total_equity - total_init
