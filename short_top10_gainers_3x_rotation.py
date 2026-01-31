@@ -258,6 +258,12 @@ def execute_rotation(opener, data, market_map, top_10):
     return True
 
 def report_to_wechat(opener, data, market_map):
+    # --- [修改] 增加调试日志 ---
+    if not SERVERCHAN_KEY:
+        print("\n⚠️ [通知跳过] 未检测到 SERVERCHAN_KEY 环境变量。")
+        print("   请检查: 1. GitHub Secrets 是否配置正确? 2. YAML 文件是否包含 env: SERVERCHAN_KEY?")
+        return
+    # -------------------------
     if not SERVERCHAN_KEY: return
     print("\n📤 正在生成全仓净值报告...")
     
