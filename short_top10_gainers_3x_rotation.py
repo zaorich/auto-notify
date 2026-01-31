@@ -4,7 +4,7 @@ import json
 import time
 import os
 import csv
-import re  # 引入正则模块，用于过滤非法字符
+import re
 from datetime import datetime
 
 # --- 策略核心配置 ---
@@ -50,8 +50,7 @@ def get_market_rank(opener):
     rank_list = []
     current_ts = int(time.time() * 1000)
     
-    # [修复] 正则表达式：只允许由大写字母和数字组成的交易对
-    # 过滤掉中文、特殊符号等异常数据
+    # 正则表达式：只允许由大写字母和数字组成的交易对
     valid_symbol_pattern = re.compile(r'^[A-Z0-9]+$')
     
     for item in data:
@@ -59,8 +58,6 @@ def get_market_rank(opener):
         
         # 1. 过滤非法字符
         if not valid_symbol_pattern.match(symbol):
-            # 只有调试时才打印，避免刷屏
-            # print(f"⚠️ 跳过异常名交易对: {symbol}")
             continue
 
         # 2. 过滤10分钟无成交的僵尸数据
@@ -76,28 +73,27 @@ def get_market_rank(opener):
     return market_map, rank_list[:POSITIONS_COUNT]
 
 def get_recent_high_price(opener, symbol):
-    """
-    [修复] 获取指定币种过去15分钟K线（1根）的最高价
-    使用了 quote 处理 symbol，防止特殊字符导致 URL 报错
-    """
+    """获取过去15分钟K线最高价 (含URL编码修复)"""
     safe_symbol = urllib.parse.quote(symbol)
     url = f"https://fapi.binance.com/fapi/v1/klines?symbol={safe_symbol}&interval=15m&limit=1"
     
     data = get_data(opener, url)
     
     if data and len(data) > 0:
-        # K线数据格式: [Open Time, Open, High, Low, Close, ...]
-        # 索引 2 是 High Price
         return float(data[0][2])
     return 0.0
 
 def log_to_csv(record_type, strategy_id, symbol, price, high_price, amount, equity, balance, note=""):
     """
-    CSV 记录函数
+    CSV 记录函数 (同时打印到控制台)
     """
     file_exists = os.path.isfile(HISTORY_FILE)
     current_time = time.strftime('%Y-%m-%d %H:%M:%S')
     
+    # 1. 打印到日志
+    print(f"📝 [CSV] {record_type:<10} 策略{strategy_id:<2} {symbol:<8} 价格:{price:<8g} 净值:{equity} 备注:{note}")
+
+    # 2. 写入文件
     try:
         with open(HISTORY_FILE, 'a', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
@@ -140,31 +136,23 @@ def check_risk_management(opener, data, market_map):
             amount = pos['amount']
             margin = pos['margin']
             
-            # 1. 获取当前价
+            # 获取价格数据
             curr_price = market_map.get(symbol, entry_price)
-            
-            # 2. 获取过去15分钟最高价 (插针检测)
             high_15m = get_recent_high_price(opener, symbol)
-            # 如果获取失败(为0)或者滞后，保底使用当前价
             check_price = max(curr_price, high_15m) if high_15m > 0 else curr_price
             
-            # 计算最大可能亏损 (按最高价算)
+            # 计算盈亏
             max_loss_pnl = (entry_price - check_price) * amount
-            
-            # 当前实际净值 (按当前价算)
             curr_pnl = (entry_price - curr_price) * amount
             equity = margin + curr_pnl 
 
-            # 记录 CSV (类型 MONITOR)
+            # 记录 CSV
             log_to_csv("MONITOR", s_id, symbol, curr_price, check_price, amount, f"{equity:.2f}", strategy['balance'], "监控")
 
-            # 3. 爆仓判断
-            # 如果亏损超过保证金 (净值归零)
+            # 爆仓判断
             if max_loss_pnl <= -margin:
                 print(f"    💥 策略{s_id} {symbol} 触发爆仓! (15m最高: {check_price})")
-                
                 log_to_csv("LIQUIDATION", s_id, symbol, check_price, check_price, amount, 0, strategy['balance'] - margin, "15m插针爆仓")
-                
                 strategy['balance'] -= margin
                 positions_changed = True
             else:
@@ -206,9 +194,7 @@ def execute_rotation(opener, data, market_map, top_10):
     if current_balance < 100: 
         log_to_csv("SKIP", current_hour, "ALL", 0, 0, 0, 0, current_balance, "余额不足")
     else:
-        # 资金分配：余额分成 10 份
         margin_per_coin = current_balance / POSITIONS_COUNT
-        
         top10_str = "|".join([x['symbol'] for x in top_10])
         log_to_csv("INFO", current_hour, "TOP10_LIST", 0, 0, 0, 0, current_balance, top10_str)
 
@@ -216,8 +202,6 @@ def execute_rotation(opener, data, market_map, top_10):
         for item in top_10:
             symbol = item['symbol']
             price = item['price']
-            
-            # 数量 = (保证金 * 杠杆) / 价格
             amount = (margin_per_coin * LEVERAGE) / price
             
             new_positions.append({
@@ -237,14 +221,13 @@ def execute_rotation(opener, data, market_map, top_10):
 def report_to_wechat(opener, data, market_map):
     if not SERVERCHAN_KEY: return
 
-    print("📤 正在生成详细报告...")
+    print("\n📤 正在生成详细报告...")
     
     total_balance = 0
     total_init = 24 * INIT_BALANCE
     max_profit = -999999
     best_strategy = ""
     
-    # 汇总表格
     md_table = "| ID | 余额 | 盈亏 | 持仓 |\n| :---: | :---: | :---: | :---: |\n"
     detail_text = ""
     
@@ -277,11 +260,9 @@ def report_to_wechat(opener, data, market_map):
                 high_15m = get_recent_high_price(opener, symbol)
                 if high_15m == 0: high_15m = curr
                 
-                # 计算净值
                 unrealized_pnl = (entry - curr) * amount
                 equity = margin + unrealized_pnl
                 
-                # 预警标记
                 warn = "⚠️" if high_15m > entry * 1.05 else ""
                 
                 detail_text += f"- `{symbol:<6} {entry:<8g} {curr:<8g} {high_15m:<8g} {equity:>6.1f}U {warn}`\n"
@@ -304,6 +285,13 @@ def report_to_wechat(opener, data, market_map):
 {detail_text}
     """
 
+    # --- 这里增加了打印，方便在 GitHub Actions 日志里直接看 ---
+    print(f"\n{'='*20} 📢 微信通知预览 {'='*20}")
+    print(f"【标题】: {title}")
+    print(f"【正文】:\n{description}")
+    print(f"{'='*55}\n")
+
+    # 发送请求
     url = f"https://sctapi.ftqq.com/{SERVERCHAN_KEY}.send"
     params = {'title': title, 'desp': description}
     try:
@@ -315,21 +303,13 @@ def report_to_wechat(opener, data, market_map):
 
 if __name__ == "__main__":
     opener = get_proxy_opener()
-    
-    # 1. 获取基础行情
     market_map, top_10 = get_market_rank(opener)
     
     if market_map:
         data = load_state()
-        
-        # 2. 风控检查 (含插针检测)
         check_risk_management(opener, data, market_map)
-        
-        # 3. 轮动 (只在整点执行)
         has_rotated = execute_rotation(opener, data, market_map, top_10)
-        
         save_state(data)
         
-        # 4. 只有轮动后才发报告
         if has_rotated:
             report_to_wechat(opener, data, market_map)
