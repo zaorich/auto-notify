@@ -39,10 +39,11 @@ jobs:
         git config --global user.name "StrategyBot"
         git config --global user.email "bot@github.com"
         
-        git add strategy_state.json strategy_history.csv
+        # 修改这里：添加 equity_curve.csv
+        git add strategy_state.json strategy_history.csv equity_curve.csv
         
         if [[ -n $(git status -s) ]]; then
-          git commit -m "📊 Update: Position Check & History [$(date)]"
+          git commit -m "📊 Update Data & Equity Curve [$(date)]"
           git push
         else
           echo "No changes."
