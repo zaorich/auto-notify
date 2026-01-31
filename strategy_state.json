@@ -517,8 +517,79 @@
   },
   "18": {
     "balance": 1000.0,
-    "positions": [],
-    "last_trade_date": ""
+    "positions": [
+      {
+        "symbol": "BULLAUSDT",
+        "entry_price": 0.21516,
+        "margin": 100.0,
+        "amount": 1394.3112102621305,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "CYSUSDT",
+        "entry_price": 0.3153,
+        "margin": 100.0,
+        "amount": 951.4747859181731,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "\u6211\u8e0f\u9a6c\u6765\u4e86USDT",
+        "entry_price": 0.033595,
+        "margin": 100.0,
+        "amount": 8929.900282780176,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "SENTUSDT",
+        "entry_price": 0.04022,
+        "margin": 100.0,
+        "amount": 7458.975634012929,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "FHEUSDT",
+        "entry_price": 0.14846,
+        "margin": 100.0,
+        "amount": 2020.7463289775023,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "AWEUSDT",
+        "entry_price": 0.05283,
+        "margin": 100.0,
+        "amount": 5678.591709256104,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "UBUSDT",
+        "entry_price": 0.03815,
+        "margin": 100.0,
+        "amount": 7863.6959370904315,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "XPTUSDT",
+        "entry_price": 2194.0,
+        "margin": 100.0,
+        "amount": 0.13673655423883319,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "COLLECTUSDT",
+        "entry_price": 0.05185,
+        "margin": 100.0,
+        "amount": 5785.9209257473485,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "BTCDOMUSDT",
+        "entry_price": 5024.3,
+        "margin": 100.0,
+        "amount": 0.05970981032183587,
+        "leverage": 3.0
+      }
+    ],
+    "last_trade_date": "2026-01-31"
   },
   "19": {
     "balance": 1000.0,
