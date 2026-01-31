@@ -39,18 +39,19 @@ jobs:
         git config --global user.name "StrategyBot"
         git config --global user.email "bot@github.com"
         
-        # 1. 先把生成的文件添加到暂存区
-        git add strategy_state.json strategy_history.csv equity_curve.csv
+        # 1. [核心修复] 开启自动暂存，如果遇到未提交的脏数据，先存起来再拉取
+        git config --global rebase.autoStash true
         
-        # 2. 检查是否有变化
+        # 2. [改进] 使用 git add . 添加所有变更，防止有文件漏网导致“未暂存”错误
+        git add .
+        
+        # 3. 检查是否有状态变化
         if [[ -n $(git status -s) ]]; then
-          # 3. 先提交到本地
           git commit -m "📊 Update Data & Equity Curve [$(date)]"
           
-          # 4. 【核心修复】拉取远程最新代码并变基（解决冲突的关键）
+          # 4. 拉取并变基 (现在即使有脏数据，autoStash 也会处理)
           git pull --rebase origin main
           
-          # 5. 推送
           git push
         else
           echo "No changes."
