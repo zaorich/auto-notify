@@ -365,8 +365,79 @@
   },
   "16": {
     "balance": 1000.0,
-    "positions": [],
-    "last_trade_date": ""
+    "positions": [
+      {
+        "symbol": "BULLAUSDT",
+        "entry_price": 0.17393,
+        "margin": 100.0,
+        "amount": 1724.8318288966825,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "CYSUSDT",
+        "entry_price": 0.3154,
+        "margin": 100.0,
+        "amount": 951.1731135066582,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "\u6211\u8e0f\u9a6c\u6765\u4e86USDT",
+        "entry_price": 0.040019,
+        "margin": 100.0,
+        "amount": 7496.439191384093,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "SYNUSDT",
+        "entry_price": 0.09751,
+        "margin": 100.0,
+        "amount": 3076.6075274330838,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "SENTUSDT",
+        "entry_price": 0.04065,
+        "margin": 100.0,
+        "amount": 7380.073800738008,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "CCUSDT",
+        "entry_price": 0.19345,
+        "margin": 100.0,
+        "amount": 1550.7883173946755,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "CLANKERUSDT",
+        "entry_price": 39.24,
+        "margin": 100.0,
+        "amount": 7.6452599388379205,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "RIFUSDT",
+        "entry_price": 0.0378,
+        "margin": 100.0,
+        "amount": 7936.507936507936,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "MEGAUSDT",
+        "entry_price": 0.13945,
+        "margin": 100.0,
+        "amount": 2151.308712800287,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "IRYSUSDT",
+        "entry_price": 0.053668,
+        "margin": 100.0,
+        "amount": 5589.923231720951,
+        "leverage": 3.0
+      }
+    ],
+    "last_trade_date": "2026-01-31"
   },
   "17": {
     "balance": 1000.0,
