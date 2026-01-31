@@ -1,0 +1,50 @@
+name: 24h Short Strategy Bot
+
+on:
+  schedule:
+    # 每 15 分钟运行一次 (0, 15, 30, 45)
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+jobs:
+  run-strategy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # 必须开启写入权限
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    # 启动代理
+    - name: Start Xray Proxy
+      run: |
+        wget https://github.com/XTLS/Xray-core/releases/download/v1.8.4/Xray-linux-64.zip
+        unzip -o Xray-linux-64.zip
+        chmod +x xray
+        nohup ./xray -config config.json > /dev/null 2>&1 &
+        sleep 5
+
+    # 运行策略脚本
+    - name: Run Strategy Script
+      run: python short_top10_gainers_3x_rotation.py
+
+    # 提交数据变化到仓库
+    - name: Save Strategy Data
+      run: |
+        git config --global user.name "StrategyBot"
+        git config --global user.email "bot@github.com"
+        
+        # 如果 strategy_data.json 发生变化，则提交
+        if [[ -n $(git status -s) ]]; then
+          git add strategy_data.json
+          git commit -m "📈 Update Strategy Data [$(date)]"
+          git push
+        else
+          echo "No data changes."
+        fi
