@@ -4,7 +4,7 @@ import json
 import time
 import os
 import csv
-# import re  <-- 不需要正则了，直接注释掉或删除
+# import re
 from datetime import datetime
 
 # --- 策略核心配置 ---
@@ -34,15 +34,10 @@ def get_data(opener, url):
         with opener.open(req) as response:
             return json.loads(response.read().decode('utf-8'))
     except Exception as e:
-        # 这里打印错误但不退出，防止单个请求失败影响整体
         print(f"❌ 请求失败 [{url}]: {e}")
         return None
 
 def get_market_rank(opener):
-    """
-    获取涨幅榜 Top 10
-    [修改]：移除了正则过滤，任何字符的币种只要涨幅够高都会被选中
-    """
     url = "https://fapi.binance.com/fapi/v1/ticker/24hr"
     data = get_data(opener, url)
     if not data: return {}, []
@@ -53,14 +48,9 @@ def get_market_rank(opener):
     
     for item in data:
         symbol = item['symbol']
-        
-        # 1. [已删除] 正则过滤逻辑
-        # 只要 API 给数据，我们就接收
-        
-        # 2. 依然保留时间过滤，防止完全没成交的僵尸数据（可选，如果您连僵尸数据也要，可以把这个也注释掉）
+        # 移除正则过滤，接收所有币种
         if current_ts - int(item['closeTime']) > 10 * 60 * 1000:
             continue
-            
         price = float(item['lastPrice'])
         change = float(item['priceChangePercent'])
         market_map[symbol] = price
@@ -70,21 +60,64 @@ def get_market_rank(opener):
     return market_map, rank_list[:POSITIONS_COUNT]
 
 def get_recent_high_price(opener, symbol):
-    """
-    获取过去15分钟K线最高价
-    [关键]：使用 urllib.parse.quote 对 symbol 进行编码，解决中文/特殊字符报错问题
-    """
-    # 将 "我踏马来了USDT" 转换为 "%E6%88%91..."
     safe_symbol = urllib.parse.quote(symbol)
-    
     url = f"https://fapi.binance.com/fapi/v1/klines?symbol={safe_symbol}&interval=15m&limit=1"
     data = get_data(opener, url)
     if data and len(data) > 0:
         return float(data[0][2])
     return 0.0
 
+# --- [新增] 核心计算函数 (统一口径) ---
+def calculate_strategy_equity(strategy, market_map, opener=None, use_high_price=False):
+    """
+    计算单个策略的当前动态净值
+    :param use_high_price: True则使用15m最高价(用于风控), False则使用现价(用于报表)
+    :return: (equity, details_list)
+    """
+    wallet_balance = strategy['balance']
+    positions = strategy['positions']
+    
+    total_unrealized_pnl = 0.0
+    details = []
+    
+    if positions:
+        for pos in positions:
+            symbol = pos['symbol']
+            entry = float(pos['entry_price'])
+            amount = float(pos['amount'])
+            
+            # 获取价格
+            curr = market_map.get(symbol, entry)
+            
+            calc_price = curr
+            warn_msg = ""
+            
+            # 如果需要插针检测 (Opener 不为空且指定了 use_high_price)
+            if opener and use_high_price:
+                high_15m = get_recent_high_price(opener, symbol)
+                if high_15m > 0:
+                    calc_price = max(curr, high_15m)
+                    if high_15m > entry * 1.05: warn_msg = "⚠️"
+
+            # 这里的 calc_price: 报表时是现价，风控时是插针价
+            # 做空盈亏 = (开仓 - 结算) * 数量
+            pnl = (entry - calc_price) * amount
+            total_unrealized_pnl += pnl
+            
+            details.append({
+                'symbol': symbol,
+                'entry': entry,
+                'curr': curr,
+                'calc_price': calc_price,
+                'amount': amount,
+                'pnl': pnl,
+                'warn': warn_msg
+            })
+            
+    equity = wallet_balance + total_unrealized_pnl
+    return equity, details
+
 def log_to_csv(record_type, strategy_id, symbol, price, high_price, amount, pos_pnl, equity, note=""):
-    """记录详细操作日志"""
     file_exists = os.path.isfile(HISTORY_FILE)
     current_time = time.strftime('%Y-%m-%d %H:%M:%S')
     
@@ -100,7 +133,6 @@ def log_to_csv(record_type, strategy_id, symbol, price, high_price, amount, pos_
         print(f"❌ 写入历史CSV失败: {e}")
 
 def record_equity_snapshot(data, market_map):
-    """记录净值曲线"""
     file_exists = os.path.isfile(EQUITY_FILE)
     current_time = time.strftime('%Y-%m-%d %H:%M:%S')
     
@@ -109,21 +141,11 @@ def record_equity_snapshot(data, market_map):
     
     for i in range(24):
         s_id = str(i)
-        strategy = data[s_id]
-        equity = strategy['balance'] 
-        
-        if strategy['positions']:
-            for pos in strategy['positions']:
-                symbol = pos['symbol']
-                entry = pos['entry_price']
-                amount = pos['amount']
-                curr = market_map.get(symbol, entry)
-                pnl = (entry - curr) * amount
-                equity += pnl
-        
-        if equity < 0: equity = 0
-        row_data.append(round(equity, 2))
-        total_equity += equity
+        # 使用统一函数计算 (False表示使用现价画图)
+        eq, _ = calculate_strategy_equity(data[s_id], market_map, opener=None, use_high_price=False)
+        if eq < 0: eq = 0
+        row_data.append(round(eq, 2))
+        total_equity += eq
         
     row_data.append(round(total_equity, 2))
     
@@ -134,7 +156,6 @@ def record_equity_snapshot(data, market_map):
                 headers = ["Time"] + [f"S_{i}" for i in range(24)] + ["Total"]
                 writer.writerow(headers)
             writer.writerow(row_data)
-        print("📈 [图表数据] 已更新净值曲线数据")
     except Exception as e:
         print(f"❌ 写入净值CSV失败: {e}")
 
@@ -160,40 +181,20 @@ def check_risk_management(opener, data, market_map):
     
     for s_id in data:
         strategy = data[s_id]
-        wallet_balance = strategy['balance']
-        positions = strategy['positions']
+        if not strategy['positions']: continue
+
+        # 调用核心计算函数 (use_high_price=True, 开启插针检测)
+        equity, details = calculate_strategy_equity(strategy, market_map, opener, use_high_price=True)
         
-        if not positions: continue
-
-        total_unrealized_pnl = 0.0
-        details = []
-
-        for pos in positions:
-            symbol = pos['symbol']
-            entry = pos['entry_price']
-            amount = pos['amount']
-            
-            curr = market_map.get(symbol, entry)
-            # 这里调用了 quote 处理过的 K 线请求函数
-            high_15m = get_recent_high_price(opener, symbol)
-            risk_price = max(curr, high_15m) if high_15m > 0 else curr
-            
-            pnl = (entry - risk_price) * amount
-            total_unrealized_pnl += pnl
-            
-            details.append({
-                'symbol': symbol, 'curr': curr, 'high': risk_price, 'amount': amount, 'pnl': pnl
-            })
-
-        equity = wallet_balance + total_unrealized_pnl
-        
+        # 记录监控日志
         for d in details:
-            log_to_csv("MONITOR", s_id, d['symbol'], d['curr'], d['high'], d['amount'], d['pnl'], equity, "全仓监控")
+            log_to_csv("MONITOR", s_id, d['symbol'], d['curr'], d['calc_price'], d['amount'], d['pnl'], equity, "全仓监控")
 
+        # 爆仓判断
         if equity <= 0:
             print(f"💥 策略 {s_id} 触发全仓爆仓! 净值归零")
             for d in details:
-                log_to_csv("LIQUIDATION", s_id, d['symbol'], d['high'], d['high'], d['amount'], d['pnl'], 0, "全仓强平")
+                log_to_csv("LIQUIDATION", s_id, d['symbol'], d['calc_price'], d['calc_price'], d['amount'], d['pnl'], 0, "全仓强平")
             strategy['balance'] = 0
             strategy['positions'] = []
 
@@ -207,20 +208,21 @@ def execute_rotation(opener, data, market_map, top_10):
 
     print(f"\n🔄 [执行] 策略 {current_hour} 轮动逻辑...")
     
+    # 1. 平仓逻辑
     total_close_pnl = 0
     wallet_balance = strategy['balance']
     
-    # 1. 平仓逻辑
     if wallet_balance > 0 and strategy['positions']:
         for pos in strategy['positions']:
             symbol = pos['symbol']
-            entry = pos['entry_price']
-            amount = pos['amount']
+            entry = float(pos['entry_price'])
+            amount = float(pos['amount'])
             
             exit_price = market_map.get(symbol, entry)
             pnl = (entry - exit_price) * amount
             total_close_pnl += pnl
             
+            # 临时净值用于记录
             temp_equity = wallet_balance + total_close_pnl
             log_to_csv("CLOSE", current_hour, symbol, exit_price, exit_price, amount, pnl, temp_equity, "轮动平仓")
 
@@ -258,14 +260,11 @@ def execute_rotation(opener, data, market_map, top_10):
     return True
 
 def report_to_wechat(opener, data, market_map):
-    # --- [修改] 增加调试日志 ---
-    if not SERVERCHAN_KEY:
-        print("\n⚠️ [通知跳过] 未检测到 SERVERCHAN_KEY 环境变量。")
-        print("   请检查: 1. GitHub Secrets 是否配置正确? 2. YAML 文件是否包含 env: SERVERCHAN_KEY?")
+    if not SERVERCHAN_KEY: 
+        print("⚠️ 未配置 SERVERCHAN_KEY，跳过通知")
         return
-    # -------------------------
-    if not SERVERCHAN_KEY: return
-    print("\n📤 正在生成全仓净值报告...")
+        
+    print("\n📤 正在生成全仓净值报告 (使用统一计算函数)...")
     
     total_equity = 0
     total_init = 24 * INIT_BALANCE
@@ -277,30 +276,12 @@ def report_to_wechat(opener, data, market_map):
     
     for i in range(24):
         s_id = str(i)
-        info = data[s_id]
-        wallet_bal = info['balance']
-        positions = info['positions']
         
-        strategy_floating_pnl = 0
-        pos_details = []
+        # [关键] 调用同一个计算函数，使用现价 (use_high_price=False)
+        # 这样能保证和 CSV 里的逻辑、数据源完全一致
+        equity, details = calculate_strategy_equity(data[s_id], market_map, opener, use_high_price=False)
         
-        if positions:
-            for pos in positions:
-                symbol = pos['symbol']
-                entry = pos['entry_price']
-                amount = pos['amount']
-                
-                curr = market_map.get(symbol, entry)
-                high_15m = get_recent_high_price(opener, symbol)
-                if high_15m == 0: high_15m = curr
-                
-                pnl = (entry - curr) * amount
-                strategy_floating_pnl += pnl
-                
-                warn = "⚠️" if high_15m > entry * 1.05 else ""
-                pos_details.append(f"- `{symbol:<6} 开:{entry:<8g} 现:{curr:<8g} 盈亏:{pnl:+.1f}U {warn}`")
-
-        equity = wallet_bal + strategy_floating_pnl
+        # 累加总净值
         total_equity += equity
         net_pnl = equity - INIT_BALANCE
         
@@ -309,11 +290,18 @@ def report_to_wechat(opener, data, market_map):
             best_strategy = f"策略{s_id}"
 
         icon = "🔴" if net_pnl < 0 else "🟢"
-        md_table += f"| {s_id} | {equity:.0f} | {icon}{net_pnl:+.0f} | {len(positions)} |\n"
+        pos_len = len(data[s_id]['positions'])
+        md_table += f"| {s_id} | {equity:.0f} | {icon}{net_pnl:+.0f} | {pos_len} |\n"
 
-        if positions:
+        if pos_len > 0:
             detail_text += f"\n🔷 **策略 {s_id} 全仓详情** (净值:{equity:.1f}U):\n"
-            detail_text += "\n".join(pos_details) + "\n"
+            for d in details:
+                # 打印详细 debug 信息到控制台，方便你核对
+                print(f"   Debug {s_id}: {d['symbol']} 开:{d['entry']} 现:{d['curr']} 量:{d['amount']:.4f} PnL:{d['pnl']:.2f}")
+                
+                # 微信消息格式
+                warn = d.get('warn', '')
+                detail_text += f"- `{d['symbol']:<6} 开:{d['entry']:<8g} 现:{d['curr']:<8g} 盈亏:{d['pnl']:+.1f}U {warn}`\n"
 
     total_pnl = total_equity - total_init
     total_pnl_pct = (total_pnl / total_init) * 100
@@ -334,10 +322,9 @@ def report_to_wechat(opener, data, market_map):
 {detail_text}
     """
     
-    print(f"\n{'='*20} 📢 微信通知内容 (Log) {'='*20}")
-    print(f"【标题】: {title}")
-    print(f"【正文】:\n{description}")
-    print(f"{'='*55}\n")
+    print(f"\n{'='*20} 📢 微信通知内容 {'='*20}")
+    print(f"标题: {title}")
+    print("正文已生成，准备发送...")
 
     url = f"https://sctapi.ftqq.com/{SERVERCHAN_KEY}.send"
     params = {'title': title, 'desp': description}
@@ -355,17 +342,16 @@ if __name__ == "__main__":
     if market_map:
         data = load_state()
         
-        # 1. 风控检查
+        # 1. 风控 (使用 High Price 检测)
         check_risk_management(opener, data, market_map)
         
-        # 2. 轮动开仓
+        # 2. 轮动
         has_rotated = execute_rotation(opener, data, market_map, top_10)
         
-        # 3. 记录净值曲线
+        # 3. 记录净值曲线 (使用 Current Price)
         record_equity_snapshot(data, market_map)
         
         save_state(data)
         
-        #if has_rotated:
-        #    report_to_wechat(opener, data, market_map)
-        report_to_wechat(opener, data, market_map)
+        if has_rotated:
+            report_to_wechat(opener, data, market_map)
