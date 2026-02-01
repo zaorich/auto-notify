@@ -28,7 +28,8 @@ jobs:
 
     - name: Start Xray Proxy
       run: |
-        wget https://github.com/XTLS/Xray-core/releases/download/v1.8.4/Xray-linux-64.zip
+        # 修改点：加上 -O Xray-linux-64.zip，强制覆盖原文件
+        wget -O Xray-linux-64.zip https://github.com/XTLS/Xray-core/releases/download/v1.8.4/Xray-linux-64.zip
         unzip -o Xray-linux-64.zip
         chmod +x xray
         nohup ./xray -config config.json > /dev/null 2>&1 &
