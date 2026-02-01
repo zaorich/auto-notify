@@ -11,8 +11,79 @@
   },
   "2": {
     "balance": 1000.0,
-    "positions": [],
-    "last_trade_date": ""
+    "positions": [
+      {
+        "symbol": "BULLAUSDT",
+        "entry_price": 0.30206,
+        "margin": 100.0,
+        "amount": 993.1801628815467,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "\u6211\u8e0f\u9a6c\u6765\u4e86USDT",
+        "entry_price": 0.051684,
+        "margin": 100.0,
+        "amount": 5804.504295333179,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "CYSUSDT",
+        "entry_price": 0.339,
+        "margin": 100.0,
+        "amount": 884.9557522123894,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "ZKPUSDT",
+        "entry_price": 0.13194,
+        "margin": 100.0,
+        "amount": 2273.7608003638015,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "C98USDT",
+        "entry_price": 0.0254,
+        "margin": 100.0,
+        "amount": 11811.023622047245,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "MEGAUSDT",
+        "entry_price": 0.14837,
+        "margin": 100.0,
+        "amount": 2021.9720967850644,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "HANAUSDT",
+        "entry_price": 0.0326,
+        "margin": 100.0,
+        "amount": 9202.453987730063,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "FHEUSDT",
+        "entry_price": 0.14286,
+        "margin": 100.0,
+        "amount": 2099.9580008399835,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "TRUTHUSDT",
+        "entry_price": 0.014399,
+        "margin": 100.0,
+        "amount": 20834.780193068964,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "IRUSDT",
+        "entry_price": 0.06642,
+        "margin": 100.0,
+        "amount": 4516.711833785004,
+        "leverage": 3.0
+      }
+    ],
+    "last_trade_date": "2026-02-01"
   },
   "3": {
     "balance": 1000.0,
