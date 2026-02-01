@@ -1,0 +1,44 @@
+name: 🧹 手动清理垃圾文件
+
+# 这里的 workflow_dispatch 意味着这是一个"手动开关"
+# 你必须在 Actions 页面点击按钮才会运行，不会自动运行
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write  # 必须给写权限，否则无法删除文件
+
+jobs:
+  cleanup-job:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 🗑️ 执行删除命令
+        run: |
+          echo "正在查找并删除所有 Xray-linux-64.zip 开头的文件..."
+          
+          # 1. 使用 find 命令查找并删除当前目录下所有匹配的文件
+          # -name "Xray-linux-64.zip*" : 匹配所有带编号的 zip
+          # -delete : 直接删除
+          find . -maxdepth 1 -name "Xray-linux-64.zip*" -print -delete
+          
+          echo "✅ 删除操作完成 (本地)"
+
+      - name: 📤 提交并推送到仓库
+        run: |
+          git config --global user.name "CleanupBot"
+          git config --global user.email "bot@github.com"
+          
+          # git add -u 表示只处理被修改/删除的文件
+          git add -u
+          
+          # 检查是否有文件被删除了，如果有则提交
+          if [[ -n $(git status -s) ]]; then
+            git commit -m "🗑️ [手动清理] 批量删除堆积的 zip 文件"
+            git push
+            echo "🎉 成功！垃圾文件已从仓库彻底清除。"
+          else
+            echo "👀 仓库很干净，没有发现需要提交的更改。"
+          fi
