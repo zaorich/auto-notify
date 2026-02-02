@@ -24,10 +24,10 @@ ENABLE_COMPOUNDING = True
 ENABLE_ROI_PAYBACK = True
 
 # 基础参数
-INITIAL_UNIT = 1000.0     # 标准开仓/复活金额
-POSITIONS_COUNT = 10      # 持仓数量
-LEVERAGE = 3.0            # 杠杆倍数
-MIN_ALIVE_BALANCE = 10.0  # “存活”阈值
+INITIAL_UNIT = 1000.0     
+POSITIONS_COUNT = 10      
+LEVERAGE = 3.0            
+MIN_ALIVE_BALANCE = 10.0  
 
 HEADERS = {'User-Agent': 'Mozilla/5.0'}
 SERVERCHAN_KEY = os.environ.get("SERVERCHAN_KEY")
@@ -118,13 +118,26 @@ def calculate_strategy_equity(strategy, market_map, opener=None, use_high_price=
     return equity, details
 
 def log_to_csv(record_type, strategy_id, symbol, price, high_price, amount, pos_pnl, equity, total_invested, note=""):
+    """
+    日志记录函数
+    优化：控制台打印所有日志，但CSV文件只记录关键交易事件，避免文件膨胀。
+    """
     file_exists = os.path.isfile(HISTORY_FILE)
     current_time = time.strftime('%Y-%m-%d %H:%M:%S')
     
     equity_val = float(equity)
     invested_val = float(total_invested)
     
+    # 1. 控制台日志：永远打印，方便在线调试
     print(f"📝 [CSV] {record_type:<10} 策略{strategy_id:<2} {symbol:<8} 净值:{equity_val:.0f} 投入:{invested_val:.0f} | {note}")
+
+    # 2. CSV文件过滤：只记录真正的资金变动
+    # KEEP: OPEN(开仓), CLOSE(平仓), LIQUIDATION(爆仓), REPLENISH(补钱), WITHDRAW(提钱)
+    # FILTER: MONITOR(监控), INFO(信息), SKIP(跳过)
+    CRITICAL_EVENTS = ["OPEN", "CLOSE", "LIQUIDATION", "REPLENISH", "WITHDRAW"]
+    
+    if record_type not in CRITICAL_EVENTS:
+        return # 如果不是关键事件，直接结束，不写入文件
 
     try:
         with open(HISTORY_FILE, 'a', newline='', encoding='utf-8') as f:
@@ -202,6 +215,7 @@ def check_risk_management(opener, data, market_map):
         invested = strategy.get('total_invested', INITIAL_UNIT)
 
         for d in details:
+            # 这里的 MONITOR 只会打印到控制台，不会写入CSV
             log_to_csv("MONITOR", s_id, d['symbol'], d['curr'], d['calc_price'], d['amount'], d['pnl'], equity, invested, "全仓监控")
 
         if equity <= 0:
@@ -225,11 +239,11 @@ def execute_rotation(opener, data, market_map, top_10):
 
     print(f"\n🔄 [执行] 策略 {current_hour} 轮动逻辑...")
     
-    # 1. 平旧仓
     total_close_pnl = 0
     wallet_balance = strategy['balance']
     invested = strategy['total_invested']
     
+    # 1. 平旧仓
     if wallet_balance > 0 and strategy['positions']:
         for pos in strategy['positions']:
             symbol = pos['symbol']
@@ -246,7 +260,7 @@ def execute_rotation(opener, data, market_map, top_10):
     
     current_equity = strategy['balance']
     
-    # 2. 复活检测 (爆仓补充)
+    # 2. 复活检测
     if current_equity < MIN_ALIVE_BALANCE:
         print(f"💀 策略 {current_hour} 已归零，执行复活程序...")
         strategy['balance'] = INITIAL_UNIT
@@ -254,30 +268,24 @@ def execute_rotation(opener, data, market_map, top_10):
         current_equity = strategy['balance']
         log_to_csv("REPLENISH", current_hour, "USDT", 0, 0, 0, 0, current_equity, strategy['total_invested'], "爆仓后重新投入")
     
-    # --- [新增功能] 回本/取款机制 ---
+    # 3. 回本机制
     elif ENABLE_ROI_PAYBACK and current_equity >= (INITIAL_UNIT * 2):
-        # 只要余额 >= 2000，就提取 1000
-        # 逻辑：每次翻倍(或达到阈值)，取回1个单位本金
         withdraw_amount = INITIAL_UNIT
         strategy['balance'] -= withdraw_amount
-        strategy['total_invested'] -= withdraw_amount # 减少投入记录 (甚至变负)
-        
+        strategy['total_invested'] -= withdraw_amount 
         print(f"💰 策略 {current_hour} 触发回本机制: 提取 {withdraw_amount}U!")
         log_to_csv("WITHDRAW", current_hour, "USDT", 0, 0, 0, 0, strategy['balance'], strategy['total_invested'], "回本提取")
-        current_equity = strategy['balance'] # 更新可用余额
+        current_equity = strategy['balance'] 
 
-    # --- [新增功能] 复利/固定金额开关 ---
-    # 计算用于开仓的资金 (Trading Capital)
+    # 4. 开新仓
     trading_capital = current_equity
-    
     if not ENABLE_COMPOUNDING:
-        # 如果关闭复利，且余额大于1000，则只用1000开仓
         if trading_capital > INITIAL_UNIT:
             trading_capital = INITIAL_UNIT
             print(f"🔒 策略 {current_hour} 关闭复利: 余额 {current_equity:.1f}U, 限制开仓资金为 {trading_capital}U")
     
-    # 3. 开新仓
-    if trading_capital < 1.0: # 即使是复活了，也可能因为种种原因钱不够
+    if trading_capital < 1.0: 
+        # SKIP 也会被过滤掉，只打印不写CSV
         log_to_csv("SKIP", current_hour, "ALL", 0, 0, 0, 0, current_equity, strategy['total_invested'], "资金不足")
     else:
         margin_per_coin = trading_capital / POSITIONS_COUNT
@@ -341,7 +349,6 @@ def report_to_wechat(opener, data, market_map, rotated_id, liquidated_ids):
         elif s_id == rotated_id: icon = "🔄"
         
         liq_str = str(liq_count) if liq_count > 0 else "-"
-        # 如果投入是负数(已经赚回本金)，显示特殊标记
         inv_display = f"{invested:.0f}"
         
         md_table += f"| {s_id} | {inv_display} | {equity:.0f} | {icon}{net_pnl:+.0f} | {liq_str} |\n"
@@ -361,11 +368,8 @@ def report_to_wechat(opener, data, market_map, rotated_id, liquidated_ids):
              detail_text += f"\n💀 **S{s_id}** (待复活): 累计爆仓 {liq_count} 次\n"
 
     total_pnl = total_equity - total_invested_all
-    # 如果总投入是负数（说明已经全部回本且盈利），收益率显示为 ∞ 或特殊处理
-    if total_invested_all <= 0:
-        total_pnl_pct = 999.9 # 代表无限大
-    else:
-        total_pnl_pct = (total_pnl / total_invested_all) * 100
+    if total_invested_all <= 0: total_pnl_pct = 999.9 
+    else: total_pnl_pct = (total_pnl / total_invested_all) * 100
 
     current_utc = datetime.utcnow().strftime("%H:%M")
     
@@ -377,11 +381,9 @@ def report_to_wechat(opener, data, market_map, rotated_id, liquidated_ids):
     if title_parts: title = f"{' '.join(title_parts)} | {title_base}"
     else: title = f"策略日报: {title_base}"
     
-    # 增加开关状态显示
     switch_status = []
     if ENABLE_COMPOUNDING: switch_status.append("🔥复利开启")
     else: switch_status.append("🔒单利模式")
-    
     if ENABLE_ROI_PAYBACK: switch_status.append("💰回本开启")
     
     description = f"""
