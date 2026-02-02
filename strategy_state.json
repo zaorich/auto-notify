@@ -2,7 +2,9 @@
   "0": {
     "balance": 1000.0,
     "positions": [],
-    "last_trade_date": ""
+    "last_trade_date": "",
+    "total_invested": 1000.0,
+    "liquidation_count": 0
   },
   "1": {
     "balance": 1000.0,
@@ -78,88 +80,94 @@
         "leverage": 3.0
       }
     ],
-    "last_trade_date": "2026-02-02"
+    "last_trade_date": "2026-02-02",
+    "total_invested": 1000.0,
+    "liquidation_count": 0
   },
   "2": {
-    "balance": 1000.0,
+    "balance": 1447.9313111827191,
     "positions": [
       {
-        "symbol": "BULLAUSDT",
-        "entry_price": 0.30206,
-        "margin": 100.0,
-        "amount": 993.1801628815467,
+        "symbol": "AVAAIUSDT",
+        "entry_price": 0.01042,
+        "margin": 144.7931311182719,
+        "amount": 41687.081895855634,
         "leverage": 3.0
       },
       {
-        "symbol": "\u6211\u8e0f\u9a6c\u6765\u4e86USDT",
-        "entry_price": 0.051684,
-        "margin": 100.0,
-        "amount": 5804.504295333179,
-        "leverage": 3.0
-      },
-      {
-        "symbol": "CYSUSDT",
-        "entry_price": 0.339,
-        "margin": 100.0,
-        "amount": 884.9557522123894,
-        "leverage": 3.0
-      },
-      {
-        "symbol": "ZKPUSDT",
-        "entry_price": 0.13194,
-        "margin": 100.0,
-        "amount": 2273.7608003638015,
-        "leverage": 3.0
-      },
-      {
-        "symbol": "C98USDT",
-        "entry_price": 0.0254,
-        "margin": 100.0,
-        "amount": 11811.023622047245,
-        "leverage": 3.0
-      },
-      {
-        "symbol": "MEGAUSDT",
-        "entry_price": 0.14837,
-        "margin": 100.0,
-        "amount": 2021.9720967850644,
+        "symbol": "STABLEUSDT",
+        "entry_price": 0.027079,
+        "margin": 144.7931311182719,
+        "amount": 16041.190345094565,
         "leverage": 3.0
       },
       {
         "symbol": "HANAUSDT",
-        "entry_price": 0.0326,
-        "margin": 100.0,
-        "amount": 9202.453987730063,
+        "entry_price": 0.03765,
+        "margin": 144.7931311182719,
+        "amount": 11537.301284324454,
         "leverage": 3.0
       },
       {
-        "symbol": "FHEUSDT",
-        "entry_price": 0.14286,
-        "margin": 100.0,
-        "amount": 2099.9580008399835,
+        "symbol": "UAIUSDT",
+        "entry_price": 0.2003,
+        "margin": 144.7931311182719,
+        "amount": 2168.6440007729193,
         "leverage": 3.0
       },
       {
-        "symbol": "TRUTHUSDT",
-        "entry_price": 0.014399,
-        "margin": 100.0,
-        "amount": 20834.780193068964,
+        "symbol": "LIGHTUSDT",
+        "entry_price": 0.3534,
+        "margin": 144.7931311182719,
+        "amount": 1229.143727659354,
         "leverage": 3.0
       },
       {
-        "symbol": "IRUSDT",
-        "entry_price": 0.06642,
-        "margin": 100.0,
-        "amount": 4516.711833785004,
+        "symbol": "MYXUSDT",
+        "entry_price": 5.57,
+        "margin": 144.7931311182719,
+        "amount": 77.98552842994896,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "GASUSDT",
+        "entry_price": 1.952,
+        "margin": 144.7931311182719,
+        "amount": 222.53042692357363,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "\u6211\u8e0f\u9a6c\u6765\u4e86USDT",
+        "entry_price": 0.056419,
+        "margin": 144.7931311182719,
+        "amount": 7699.168601974791,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "1000WHYUSDT",
+        "entry_price": 1.28e-05,
+        "margin": 144.7931311182719,
+        "amount": 33935890.10584498,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "1INCHUSDT",
+        "entry_price": 0.1154,
+        "margin": 144.7931311182719,
+        "amount": 3764.1195264715398,
         "leverage": 3.0
       }
     ],
-    "last_trade_date": "2026-02-01"
+    "last_trade_date": "2026-02-02",
+    "total_invested": 1000.0,
+    "liquidation_count": 0
   },
   "3": {
     "balance": 1000.0,
     "positions": [],
-    "last_trade_date": ""
+    "last_trade_date": "",
+    "total_invested": 1000.0,
+    "liquidation_count": 0
   },
   "4": {
     "balance": 1000.0,
@@ -235,7 +243,9 @@
         "leverage": 3.0
       }
     ],
-    "last_trade_date": "2026-02-01"
+    "last_trade_date": "2026-02-01",
+    "total_invested": 1000.0,
+    "liquidation_count": 0
   },
   "5": {
     "balance": 1000.0,
@@ -311,7 +321,9 @@
         "leverage": 3.0
       }
     ],
-    "last_trade_date": "2026-02-01"
+    "last_trade_date": "2026-02-01",
+    "total_invested": 1000.0,
+    "liquidation_count": 0
   },
   "6": {
     "balance": 1000.0,
@@ -387,7 +399,9 @@
         "leverage": 3.0
       }
     ],
-    "last_trade_date": "2026-02-01"
+    "last_trade_date": "2026-02-01",
+    "total_invested": 1000.0,
+    "liquidation_count": 0
   },
   "7": {
     "balance": 1000.0,
@@ -463,7 +477,9 @@
         "leverage": 3.0
       }
     ],
-    "last_trade_date": "2026-02-01"
+    "last_trade_date": "2026-02-01",
+    "total_invested": 1000.0,
+    "liquidation_count": 0
   },
   "8": {
     "balance": 1000.0,
@@ -539,7 +555,9 @@
         "leverage": 3.0
       }
     ],
-    "last_trade_date": "2026-02-01"
+    "last_trade_date": "2026-02-01",
+    "total_invested": 1000.0,
+    "liquidation_count": 0
   },
   "9": {
     "balance": 1000.0,
@@ -615,7 +633,9 @@
         "leverage": 3.0
       }
     ],
-    "last_trade_date": "2026-02-01"
+    "last_trade_date": "2026-02-01",
+    "total_invested": 1000.0,
+    "liquidation_count": 0
   },
   "10": {
     "balance": 1000.0,
@@ -691,7 +711,9 @@
         "leverage": 3.0
       }
     ],
-    "last_trade_date": "2026-02-01"
+    "last_trade_date": "2026-02-01",
+    "total_invested": 1000.0,
+    "liquidation_count": 0
   },
   "11": {
     "balance": 1000.0,
@@ -767,7 +789,9 @@
         "leverage": 3.0
       }
     ],
-    "last_trade_date": "2026-02-01"
+    "last_trade_date": "2026-02-01",
+    "total_invested": 1000.0,
+    "liquidation_count": 0
   },
   "12": {
     "balance": 254.52051818163613,
@@ -843,12 +867,16 @@
         "leverage": 3.0
       }
     ],
-    "last_trade_date": "2026-02-01"
+    "last_trade_date": "2026-02-01",
+    "total_invested": 1000.0,
+    "liquidation_count": 0
   },
   "13": {
     "balance": 0,
     "positions": [],
-    "last_trade_date": "2026-02-01"
+    "last_trade_date": "2026-02-01",
+    "total_invested": 1000.0,
+    "liquidation_count": 0
   },
   "14": {
     "balance": 994.732168994319,
@@ -924,12 +952,16 @@
         "leverage": 3.0
       }
     ],
-    "last_trade_date": "2026-02-01"
+    "last_trade_date": "2026-02-01",
+    "total_invested": 1000.0,
+    "liquidation_count": 0
   },
   "15": {
     "balance": 0,
     "positions": [],
-    "last_trade_date": "2026-02-01"
+    "last_trade_date": "2026-02-01",
+    "total_invested": 1000.0,
+    "liquidation_count": 0
   },
   "16": {
     "balance": 892.7715040430058,
@@ -1005,7 +1037,9 @@
         "leverage": 3.0
       }
     ],
-    "last_trade_date": "2026-02-01"
+    "last_trade_date": "2026-02-01",
+    "total_invested": 1000.0,
+    "liquidation_count": 0
   },
   "17": {
     "balance": 1113.286764308695,
@@ -1081,7 +1115,9 @@
         "leverage": 3.0
       }
     ],
-    "last_trade_date": "2026-02-01"
+    "last_trade_date": "2026-02-01",
+    "total_invested": 1000.0,
+    "liquidation_count": 0
   },
   "18": {
     "balance": 1071.9670920379938,
@@ -1157,7 +1193,9 @@
         "leverage": 3.0
       }
     ],
-    "last_trade_date": "2026-02-01"
+    "last_trade_date": "2026-02-01",
+    "total_invested": 1000.0,
+    "liquidation_count": 0
   },
   "19": {
     "balance": 1065.965987892266,
@@ -1233,7 +1271,9 @@
         "leverage": 3.0
       }
     ],
-    "last_trade_date": "2026-02-01"
+    "last_trade_date": "2026-02-01",
+    "total_invested": 1000.0,
+    "liquidation_count": 0
   },
   "20": {
     "balance": 1114.1343893775645,
@@ -1309,7 +1349,9 @@
         "leverage": 3.0
       }
     ],
-    "last_trade_date": "2026-02-01"
+    "last_trade_date": "2026-02-01",
+    "total_invested": 1000.0,
+    "liquidation_count": 0
   },
   "21": {
     "balance": 1204.4815265126595,
@@ -1385,7 +1427,9 @@
         "leverage": 3.0
       }
     ],
-    "last_trade_date": "2026-02-01"
+    "last_trade_date": "2026-02-01",
+    "total_invested": 1000.0,
+    "liquidation_count": 0
   },
   "22": {
     "balance": 1401.6358820960804,
@@ -1461,7 +1505,9 @@
         "leverage": 3.0
       }
     ],
-    "last_trade_date": "2026-02-01"
+    "last_trade_date": "2026-02-01",
+    "total_invested": 1000.0,
+    "liquidation_count": 0
   },
   "23": {
     "balance": 1545.8486289164648,
@@ -1537,6 +1583,8 @@
         "leverage": 3.0
       }
     ],
-    "last_trade_date": "2026-02-01"
+    "last_trade_date": "2026-02-01",
+    "total_invested": 1000.0,
+    "liquidation_count": 0
   }
 }
