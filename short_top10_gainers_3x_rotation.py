@@ -47,7 +47,6 @@ def get_market_rank(opener):
     
     for item in data:
         symbol = item['symbol']
-        # 移除正则过滤，接收所有币种
         if current_ts - int(item['closeTime']) > 10 * 60 * 1000:
             continue
         price = float(item['lastPrice'])
@@ -166,6 +165,7 @@ def save_state(data):
 
 def check_risk_management(opener, data, market_map):
     print("\n🛡️ [监控] 开始全仓风控检查 (含插针检测)...")
+    liquidated_ids = [] # 记录本次运行爆仓的策略ID
     
     for s_id in data:
         strategy = data[s_id]
@@ -178,20 +178,25 @@ def check_risk_management(opener, data, market_map):
 
         if equity <= 0:
             print(f"💥 策略 {s_id} 触发全仓爆仓! 净值归零")
+            liquidated_ids.append(s_id) # 记录下来
+            
             for d in details:
                 log_to_csv("LIQUIDATION", s_id, d['symbol'], d['calc_price'], d['calc_price'], d['amount'], d['pnl'], 0, "全仓强平")
             strategy['balance'] = 0
             strategy['positions'] = []
+            
+    return liquidated_ids
 
 def execute_rotation(opener, data, market_map, top_10):
     current_hour = str(datetime.utcnow().hour)
     today_str = datetime.utcnow().strftime('%Y-%m-%d')
     strategy = data[current_hour]
     
+    # [逻辑优化] 只要日期不对，无论现在是14:00还是14:59，都会执行补单
     if strategy['last_trade_date'] == today_str:
-        return False
+        return None # 今天已做过，无需操作
 
-    print(f"\n🔄 [执行] 策略 {current_hour} 轮动逻辑...")
+    print(f"\n🔄 [执行] 策略 {current_hour} 轮动/补单逻辑 (当前时间不是整点也能触发)...")
     
     total_close_pnl = 0
     wallet_balance = strategy['balance']
@@ -239,14 +244,15 @@ def execute_rotation(opener, data, market_map, top_10):
         strategy['positions'] = new_positions
 
     strategy['last_trade_date'] = today_str
-    return True
+    
+    return current_hour # 返回执行了轮动的策略ID
 
-def report_to_wechat(opener, data, market_map):
+def report_to_wechat(opener, data, market_map, rotated_id, liquidated_ids):
     if not SERVERCHAN_KEY: 
         print("⚠️ 未配置 SERVERCHAN_KEY，跳过通知")
         return
         
-    print("\n📤 正在生成极简报告...")
+    print("\n📤 正在生成详细报告...")
     
     total_equity = 0
     total_init = 24 * INIT_BALANCE
@@ -268,33 +274,54 @@ def report_to_wechat(opener, data, market_map):
             max_profit = net_pnl
             best_strategy = f"策略{s_id}"
 
+        # 状态图标
         icon = "🔴" if net_pnl < 0 else "🟢"
+        if equity == 0: icon = "💀" # 爆仓
+        elif s_id == rotated_id: icon = "🔄" # 刚换仓
+        
         pos_len = len(data[s_id]['positions'])
         md_table += f"| {s_id} | {equity:.0f} | {icon}{net_pnl:+.0f} | {pos_len} |\n"
 
+        # --- 生成简报 ---
         if pos_len > 0:
-            detail_text += f"\n🔷 **策略{s_id}** (净:{equity:.0f}U):\n"
+            # 策略标题增加标记
+            prefix = ""
+            if s_id == rotated_id: prefix = "🔄"
+            
+            detail_text += f"\n🔷 **{prefix}策略{s_id}** (净:{equity:.0f}U):\n"
             
             simple_items = []
             for d in details:
-                # 警告标记
                 warn_mark = "⚠️" if d.get('warn') else ""
-                
-                # --- [重点] 移除 USDT 并格式化为 币名(盈亏) ---
                 short_symbol = d['symbol'].replace("USDT", "")
-                
-                # 示例格式: SYN(-2.0)
                 item_str = f"{short_symbol}({d['pnl']:+.1f}){warn_mark}"
                 simple_items.append(item_str)
             
-            # 使用逗号横向连接
             detail_text += ", ".join(simple_items) + "\n"
+        elif equity == 0:
+             detail_text += f"\n💀 **策略{s_id}** (已爆仓): 净值归零\n"
 
     total_pnl = total_equity - total_init
     total_pnl_pct = (total_pnl / total_init) * 100
-
     current_utc = datetime.utcnow().strftime("%H:%M")
-    title = f"策略日报: 总净值 {total_equity:.0f}U ({total_pnl_pct:+.2f}%)"
+
+    # --- [动态标题生成] ---
+    title_parts = []
+    if rotated_id:
+        title_parts.append(f"🔄S{rotated_id}")
+    if liquidated_ids:
+        # 将列表转为 S01,S05 格式
+        bust_str = ",".join([f"S{uid}" for uid in liquidated_ids])
+        title_parts.append(f"💥{bust_str}")
+        
+    title_base = f"总净值 {total_equity:.0f}U ({total_pnl_pct:+.2f}%)"
+    
+    # 组合标题: "🔄S14 💥S02 | 总净值..."
+    if title_parts:
+        title = f"{' '.join(title_parts)} | {title_base}"
+    else:
+        title = f"策略日报: {title_base}"
+    # ---------------------
     
     description = f"""
 **UTC 时间**: {current_utc}
@@ -311,6 +338,7 @@ def report_to_wechat(opener, data, market_map):
     
     print(f"\n{'='*20} 📢 微信通知预览 {'='*20}")
     print(f"标题: {title}")
+    # print(description)
     print("正文已生成，准备发送...")
 
     url = f"https://sctapi.ftqq.com/{SERVERCHAN_KEY}.send"
@@ -328,10 +356,16 @@ if __name__ == "__main__":
     
     if market_map:
         data = load_state()
-        check_risk_management(opener, data, market_map)
-        has_rotated = execute_rotation(opener, data, market_map, top_10)
+        
+        # 1. 风控 (返回爆仓名单)
+        liquidated_ids = check_risk_management(opener, data, market_map)
+        
+        # 2. 轮动 (返回轮动ID)
+        rotated_id = execute_rotation(opener, data, market_map, top_10)
+        
         record_equity_snapshot(data, market_map)
         save_state(data)
         
-        if has_rotated:
-            report_to_wechat(opener, data, market_map)
+        # 3. 只要有轮动 或者 有爆仓，就必须通知
+        if rotated_id or liquidated_ids:
+            report_to_wechat(opener, data, market_map, rotated_id, liquidated_ids)
