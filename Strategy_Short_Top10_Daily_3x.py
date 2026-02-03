@@ -23,7 +23,7 @@ INITIAL_UNIT = 1000.0     # 标准开仓/复活金额
 POSITIONS_COUNT = 10      # 持仓数量
 LEVERAGE = 3.0            # 杠杆倍数
 MIN_ALIVE_BALANCE = 10.0  # “存活”阈值
-MAX_DELAY_SECONDS = 3600  # 最大延迟容忍时间(秒)，超过只平仓不开仓
+MAX_DELAY_SECONDS = 3600  # 最大延迟容忍时间(秒)
 
 HEADERS = {'User-Agent': 'Mozilla/5.0'}
 SERVERCHAN_KEY = os.environ.get("SERVERCHAN_KEY")
@@ -123,6 +123,7 @@ def log_to_csv(record_type, strategy_id, symbol, price, high_price, amount, pos_
     equity_val = float(equity)
     invested_val = float(total_invested)
     
+    # 控制台打印
     print(f"📝 [CSV] {record_type:<10} 策略{strategy_id:<2} {symbol:<8} 净值:{equity_val:.0f} 投入:{invested_val:.0f} | {note}")
 
     CRITICAL_EVENTS = ["OPEN", "CLOSE", "LIQUIDATION", "REPLENISH", "WITHDRAW"]
@@ -208,12 +209,29 @@ def check_risk_management(opener, data, market_map):
         equity, details = calculate_strategy_equity(strategy, market_map, opener, use_high_price=True)
         invested = strategy.get('total_invested', INITIAL_UNIT)
 
+        # --- [修改点] 紧凑型详细输出 ---
+        # 1. 构建币种详情字符串列表: ["TRX(+5.2)", "BTC(-2.0)"]
+        coin_details_list = []
         for d in details:
-            log_to_csv("MONITOR", s_id, d['symbol'], d['curr'], d['calc_price'], d['amount'], d['pnl'], equity, invested, "全仓监控")
+            short_symbol = d['symbol'].replace("USDT", "")
+            # 如果有警告(插针风险)，加个!
+            warn = "!" if d.get('warn') else ""
+            coin_str = f"{short_symbol}({d['pnl']:+.1f}){warn}"
+            coin_details_list.append(coin_str)
+        
+        # 2. 拼接成一行
+        all_coins_str = " ".join(coin_details_list)
+        
+        # 3. 打印汇总行
+        pnl = equity - invested
+        # 格式: >> S14 净:980(-20) 投:1000 | TRX(+5.2) BTC(-3.1) ...
+        print(f"   >> S{s_id:<2} 净:{equity:.0f}({pnl:+.0f}) 投:{invested:.0f} | {all_coins_str}")
+        # ---------------------------
 
         if equity <= 0:
             print(f"💥 策略 {s_id} 触发全仓爆仓! 净值归零")
             liquidated_ids.append(s_id)
+            # 只有在爆仓的时候，才详细记录每个币的强平信息到CSV
             for d in details:
                 log_to_csv("LIQUIDATION", s_id, d['symbol'], d['calc_price'], d['calc_price'], d['amount'], d['pnl'], 0, invested, "全仓强平")
             
@@ -224,14 +242,13 @@ def check_risk_management(opener, data, market_map):
     return liquidated_ids
 
 def execute_single_strategy(s_id, strategy, opener, market_map, top_10, current_utc, target_date_str, is_late_close_only):
-    """执行单个策略的 平仓 和 (可选)开仓"""
     print(f"\n⚡ [操作] 策略 {s_id} (延迟模式: {'是' if is_late_close_only else '否'})")
     
-    # 1. 平旧仓
     total_close_pnl = 0
     wallet_balance = strategy['balance']
     invested = strategy['total_invested']
     
+    # 1. 平旧仓
     if wallet_balance > 0 and strategy['positions']:
         for pos in strategy['positions']:
             symbol = pos['symbol']
@@ -248,10 +265,10 @@ def execute_single_strategy(s_id, strategy, opener, market_map, top_10, current_
     
     current_equity = strategy['balance']
     
-    # 2. 如果是严重延迟(>1小时)，只平仓，记录状态后退出
+    # 2. 严重延迟处理
     if is_late_close_only:
         strategy['last_trade_date'] = target_date_str
-        print(f"🚫 策略 {s_id} 延迟超过1小时，仅执行平仓，今日不再开仓。")
+        print(f"🚫 策略 {s_id} 延迟超过1小时，仅执行平仓。")
         return "CLOSED_ONLY"
 
     # 3. 复活检测
@@ -301,19 +318,10 @@ def execute_single_strategy(s_id, strategy, opener, market_map, top_10, current_
             
         strategy['positions'] = new_positions
 
-    # 标记该策略今天已完成
     strategy['last_trade_date'] = target_date_str
     return "ROTATED"
 
 def scan_and_execute_strategies(opener, data, market_map, top_10):
-    """
-    智能扫描所有策略：
-    1. 遍历 S00-S23。
-    2. 计算每个策略最近一次'应该'运行的时间点。
-    3. 如果没运行：
-       - 延迟 <= 1小时：执行 平仓+开仓 (ROTATED)。
-       - 延迟 > 1小时：执行 仅平仓 (CLOSED_ONLY)。
-    """
     rotated_ids = []
     closed_only_ids = []
     
@@ -324,38 +332,25 @@ def scan_and_execute_strategies(opener, data, market_map, top_10):
         s_id = str(i)
         strategy = data[s_id]
         
-        # 计算该策略"今天"的预定时间
-        # 例如现在是 14:30。
-        # S14 的预定时间是 今天14:00。
-        # S15 的预定时间是 今天15:00 (未来)。
-        # S13 的预定时间是 今天13:00 (过去)。
-        
         sched_time_today = datetime(current_utc.year, current_utc.month, current_utc.day, i, 0, 0)
         
-        # 确定"最近一次应执行时间" (Target Time)
         if current_utc >= sched_time_today:
             target_dt = sched_time_today
         else:
-            # 如果还没到今天的点，那最近一次应该是昨天这个时候
             target_dt = sched_time_today - timedelta(days=1)
             
         target_date_str = target_dt.strftime('%Y-%m-%d')
         
-        # 检查是否已经执行过
         if strategy['last_trade_date'] == target_date_str:
-            continue # 已完成，跳过
+            continue 
             
-        # 计算延迟时间 (秒)
         delay_seconds = (current_utc - target_dt).total_seconds()
-        
         print(f"   >> 发现策略 {s_id} 待处理: 应执行时间 {target_dt} (延迟 {delay_seconds/60:.1f} 分钟)")
         
-        # 判断延迟程度
         is_late_close_only = False
         if delay_seconds > MAX_DELAY_SECONDS:
             is_late_close_only = True
             
-        # 执行逻辑
         result = execute_single_strategy(
             s_id, strategy, opener, market_map, top_10, 
             current_utc, target_date_str, is_late_close_only
@@ -388,7 +383,6 @@ def report_to_wechat(opener, data, market_map, rotated_ids, closed_only_ids, liq
     detail_text = ""
     current_ts = int(time.time())
     
-    # 集合所有有变动的ID，用于标记显示
     all_action_ids = set(rotated_ids + closed_only_ids + liquidated_ids)
     
     for i in range(24):
@@ -407,28 +401,24 @@ def report_to_wechat(opener, data, market_map, rotated_ids, closed_only_ids, liq
         net_pnl = equity - invested
         if net_pnl > max_profit: max_profit = net_pnl
 
-        # 状态图标逻辑
         icon = "🔴" if net_pnl < 0 else "🟢"
         if equity == 0: icon = "💀" 
         elif s_id in rotated_ids: icon = "🔄"
-        elif s_id in closed_only_ids: icon = "🛑" # 延迟仅平仓
+        elif s_id in closed_only_ids: icon = "🛑"
         
         liq_str = str(liq_count) if liq_count > 0 else "-"
         inv_display = f"{invested:.0f}"
         
         md_table += f"| {s_id} | {inv_display} | {equity:.0f} | {icon}{net_pnl:+.0f} | {liq_str} |\n"
 
-        # 生成持仓详情 (仅显示有持仓的 或 刚操作过的 或 爆仓的)
         pos_len = len(strat['positions'])
         should_show_detail = (pos_len > 0) or (s_id in all_action_ids) or (equity==0)
         
         if should_show_detail:
-            # 命名前缀
             prefix = ""
             if s_id in rotated_ids: prefix = "🔄"
             elif s_id in closed_only_ids: prefix = "🛑"
             
-            # 计算持仓时间
             duration_str = "-"
             used_margin = 0
             if pos_len > 0:
@@ -441,7 +431,6 @@ def report_to_wechat(opener, data, market_map, rotated_ids, closed_only_ids, liq
             
             liq_mark = f" 💀x{liq_count}" if liq_count > 0 else ""
             
-            # 详情行
             if s_id in closed_only_ids:
                 detail_text += f"\n🛑 **S{s_id}** (严重延迟 >1h): 仅平仓, 等待明日重启。\n"
             elif pos_len > 0:
@@ -456,14 +445,12 @@ def report_to_wechat(opener, data, market_map, rotated_ids, closed_only_ids, liq
             elif equity == 0:
                 detail_text += f"\n💀 **S{s_id}** (待复活): 累计爆仓 {liq_count} 次\n"
 
-    # 全局统计
     total_pnl = total_equity - total_invested_all
     if total_invested_all <= 0: total_pnl_pct = 999.9 
     else: total_pnl_pct = (total_pnl / total_invested_all) * 100
 
     current_utc = datetime.utcnow().strftime("%H:%M")
     
-    # 动态标题
     title_parts = []
     if rotated_ids: title_parts.append(f"🔄S{','.join(rotated_ids)}")
     if closed_only_ids: title_parts.append(f"🛑S{','.join(closed_only_ids)}")
@@ -512,10 +499,10 @@ if __name__ == "__main__":
     if market_map:
         data = load_state()
         
-        # 1. 风控 (Monitor 和 Liquidation 会发生在这里)
+        # 1. 风控 (仅输出 summary，除非爆仓)
         liquidated_ids = check_risk_management(opener, data, market_map)
         
-        # 2. 智能扫描与执行 (支持多策略同时追单)
+        # 2. 智能扫描
         rotated_ids, closed_only_ids = scan_and_execute_strategies(opener, data, market_map, top_10)
         
         # 3. 记录净值
@@ -523,7 +510,5 @@ if __name__ == "__main__":
         
         save_state(data)
         
-        # 只有在有重要事件时才发微信
-        # (有轮动的、有平仓的、有爆仓的)
         if rotated_ids or closed_only_ids or liquidated_ids:
             report_to_wechat(opener, data, market_map, rotated_ids, closed_only_ids, liquidated_ids)
