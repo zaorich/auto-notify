@@ -123,12 +123,17 @@ def log_to_csv(record_type, strategy_id, symbol, price, high_price, amount, pos_
     equity_val = float(equity)
     invested_val = float(total_invested)
     
-    # 控制台打印
-    print(f"📝 [CSV] {record_type:<10} 策略{strategy_id:<2} {symbol:<8} 净值:{equity_val:.0f} 投入:{invested_val:.0f} | {note}")
-
+    # 过滤非关键事件的控制台打印
+    # 只有关键事件才打印到控制台，防止刷屏
     CRITICAL_EVENTS = ["OPEN", "CLOSE", "LIQUIDATION", "REPLENISH", "WITHDRAW"]
+    
+    # 如果不是关键事件（比如 MONITOR），直接返回，既不打印也不写文件
+    # 注意：之前的代码这里是先print再判断，导致了刷屏。现在改为了先判断。
     if record_type not in CRITICAL_EVENTS:
         return
+
+    # 控制台打印关键信息
+    print(f"📝 [CSV] {record_type:<10} 策略{strategy_id:<2} {symbol:<8} 净值:{equity_val:.0f} 投入:{invested_val:.0f} | {note}")
 
     try:
         with open(HISTORY_FILE, 'a', newline='', encoding='utf-8') as f:
@@ -209,29 +214,30 @@ def check_risk_management(opener, data, market_map):
         equity, details = calculate_strategy_equity(strategy, market_map, opener, use_high_price=True)
         invested = strategy.get('total_invested', INITIAL_UNIT)
 
-        # --- [修改点] 紧凑型详细输出 ---
-        # 1. 构建币种详情字符串列表: ["TRX(+5.2)", "BTC(-2.0)"]
-        coin_details_list = []
-        for d in details:
-            short_symbol = d['symbol'].replace("USDT", "")
-            # 如果有警告(插针风险)，加个!
-            warn = "!" if d.get('warn') else ""
-            coin_str = f"{short_symbol}({d['pnl']:+.1f}){warn}"
-            coin_details_list.append(coin_str)
+        # --- [极简输出逻辑] ---
+        # 1. 只有当策略有持仓时，才去构建详情字符串
+        if details:
+            coin_details_list = []
+            for d in details:
+                short_symbol = d['symbol'].replace("USDT", "")
+                warn = "!" if d.get('warn') else ""
+                coin_str = f"{short_symbol}({d['pnl']:+.0f}){warn}"
+                coin_details_list.append(coin_str)
+            
+            all_coins_str = " ".join(coin_details_list)
+            pnl = equity - invested
+            # 输出一行汇总
+            print(f"   >> S{s_id:<2} 净:{equity:>5.0f} ({pnl:>+5.0f}) | {all_coins_str}")
         
-        # 2. 拼接成一行
-        all_coins_str = " ".join(coin_details_list)
-        
-        # 3. 打印汇总行
-        pnl = equity - invested
-        # 格式: >> S14 净:980(-20) 投:1000 | TRX(+5.2) BTC(-3.1) ...
-        print(f"   >> S{s_id:<2} 净:{equity:.0f}({pnl:+.0f}) 投:{invested:.0f} | {all_coins_str}")
-        # ---------------------------
+        # --- [关键修正] ---
+        # 这里删除了原本存在的 for d in details: log_to_csv("MONITOR"...) 循环
+        # 因此再也不会刷屏了！
+        # -----------------
 
         if equity <= 0:
             print(f"💥 策略 {s_id} 触发全仓爆仓! 净值归零")
             liquidated_ids.append(s_id)
-            # 只有在爆仓的时候，才详细记录每个币的强平信息到CSV
+            # 只有爆仓时，才调用 log_to_csv 记录详细强平信息
             for d in details:
                 log_to_csv("LIQUIDATION", s_id, d['symbol'], d['calc_price'], d['calc_price'], d['amount'], d['pnl'], 0, invested, "全仓强平")
             
