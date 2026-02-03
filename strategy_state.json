@@ -957,80 +957,80 @@
     "liquidation_count": 0
   },
   "15": {
-    "balance": 1000.0,
+    "balance": 1026.715721061431,
     "positions": [
       {
-        "symbol": "UAIUSDT",
-        "entry_price": 0.2109,
-        "margin": 100.0,
-        "amount": 1422.475106685633,
+        "symbol": "BIRBUSDT",
+        "entry_price": 0.34574,
+        "margin": 102.67157210614309,
+        "amount": 890.8853945694142,
         "leverage": 3.0
       },
       {
-        "symbol": "STABLEUSDT",
-        "entry_price": 0.030468,
-        "margin": 100.0,
-        "amount": 9846.396218983853,
+        "symbol": "BULLAUSDT",
+        "entry_price": 0.02879,
+        "margin": 102.67157210614309,
+        "amount": 10698.670243780105,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "ARCUSDT",
+        "entry_price": 0.06119,
+        "margin": 102.67157210614309,
+        "amount": 5033.742708259997,
         "leverage": 3.0
       },
       {
         "symbol": "ZILUSDT",
-        "entry_price": 0.00511,
-        "margin": 100.0,
-        "amount": 58708.414872798436,
+        "entry_price": 0.00621,
+        "margin": 102.67157210614309,
+        "amount": 49599.79328799182,
         "leverage": 3.0
       },
       {
-        "symbol": "MYXUSDT",
-        "entry_price": 5.974,
-        "margin": 100.0,
-        "amount": 50.21760964178105,
+        "symbol": "C98USDT",
+        "entry_price": 0.0256,
+        "margin": 102.67157210614309,
+        "amount": 12031.824856188641,
         "leverage": 3.0
       },
       {
-        "symbol": "GPSUSDT",
-        "entry_price": 0.008326,
-        "margin": 100.0,
-        "amount": 36031.7079029546,
+        "symbol": "UAIUSDT",
+        "entry_price": 0.2461,
+        "margin": 102.67157210614309,
+        "amount": 1251.5835689493263,
         "leverage": 3.0
       },
       {
-        "symbol": "RLSUSDT",
-        "entry_price": 0.008137,
-        "margin": 100.0,
-        "amount": 36868.62480029495,
+        "symbol": "SIRENUSDT",
+        "entry_price": 0.0908,
+        "margin": 102.67157210614309,
+        "amount": 3392.232558573009,
         "leverage": 3.0
       },
       {
-        "symbol": "RIVERUSDT",
-        "entry_price": 22.298,
-        "margin": 100.0,
-        "amount": 13.454121445869585,
+        "symbol": "OGUSDT",
+        "entry_price": 3.471,
+        "margin": 102.67157210614309,
+        "amount": 88.73947459476497,
         "leverage": 3.0
       },
       {
-        "symbol": "MUSDT",
-        "entry_price": 1.4798,
-        "margin": 100.0,
-        "amount": 202.73009866198134,
+        "symbol": "TRADOORUSDT",
+        "entry_price": 0.905,
+        "margin": 102.67157210614309,
+        "amount": 340.34775283804333,
         "leverage": 3.0
       },
       {
-        "symbol": "MORPHOUSDT",
-        "entry_price": 1.2639,
-        "margin": 100.0,
-        "amount": 237.36055067647757,
-        "leverage": 3.0
-      },
-      {
-        "symbol": "IRYSUSDT",
-        "entry_price": 0.054576,
-        "margin": 100.0,
-        "amount": 5496.921723834653,
+        "symbol": "ANKRUSDT",
+        "entry_price": 0.005804,
+        "margin": 102.67157210614309,
+        "amount": 53069.38599559428,
         "leverage": 3.0
       }
     ],
-    "last_trade_date": "2026-02-02",
+    "last_trade_date": "2026-02-03",
     "total_invested": 2000.0,
     "liquidation_count": 0
   },
