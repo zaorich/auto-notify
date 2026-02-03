@@ -117,22 +117,23 @@ def calculate_strategy_equity(strategy, market_map, opener=None, use_high_price=
     return equity, details
 
 def log_to_csv(record_type, strategy_id, symbol, price, high_price, amount, pos_pnl, equity, total_invested, note=""):
+    """
+    日志记录函数
+    """
     file_exists = os.path.isfile(HISTORY_FILE)
     current_time = time.strftime('%Y-%m-%d %H:%M:%S')
     
     equity_val = float(equity)
     invested_val = float(total_invested)
     
-    # 过滤非关键事件的控制台打印
-    # 只有关键事件才打印到控制台，防止刷屏
+    # 关键事件白名单
     CRITICAL_EVENTS = ["OPEN", "CLOSE", "LIQUIDATION", "REPLENISH", "WITHDRAW"]
     
-    # 如果不是关键事件（比如 MONITOR），直接返回，既不打印也不写文件
-    # 注意：之前的代码这里是先print再判断，导致了刷屏。现在改为了先判断。
+    # [关键修复] 如果不是关键事件，直接返回，连控制台都不打印
     if record_type not in CRITICAL_EVENTS:
         return
 
-    # 控制台打印关键信息
+    # 只有关键事件才会执行到这里
     print(f"📝 [CSV] {record_type:<10} 策略{strategy_id:<2} {symbol:<8} 净值:{equity_val:.0f} 投入:{invested_val:.0f} | {note}")
 
     try:
@@ -226,12 +227,11 @@ def check_risk_management(opener, data, market_map):
             
             all_coins_str = " ".join(coin_details_list)
             pnl = equity - invested
-            # 输出一行汇总
+            # 输出一行汇总 (替代了原来的 log_to_csv("MONITOR"))
             print(f"   >> S{s_id:<2} 净:{equity:>5.0f} ({pnl:>+5.0f}) | {all_coins_str}")
         
-        # --- [关键修正] ---
-        # 这里删除了原本存在的 for d in details: log_to_csv("MONITOR"...) 循环
-        # 因此再也不会刷屏了！
+        # --- [注意] ---
+        # 此时绝对没有调用 log_to_csv("MONITOR"...)，所以不会刷屏
         # -----------------
 
         if equity <= 0:
