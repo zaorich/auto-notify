@@ -20,6 +20,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+          fetch-depth: 1  # 👈 加上这一行！表示只拉取最近一次提交，忽略巨大的历史记录
 
     - name: Set up Python
       uses: actions/setup-python@v5
