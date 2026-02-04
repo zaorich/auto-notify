@@ -3,7 +3,7 @@ import numpy as np
 import os
 import requests
 import urllib.parse
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # ================= 配置区域 =================
 HISTORY_FILE = 'strategy_history.csv'
@@ -53,89 +53,109 @@ def calculate_max_drawdown(equity_series):
     drawdown = (equity_series - peak) / peak
     return drawdown.min() * 100
 
-def analyze_best_short_time(history_df):
+def analyze_market_mechanics(history_df):
     """
-    分析：币种首次上榜后，随着时间推移的价格变化
-    返回：Markdown 格式的分析表格
+    深度分析模块：
+    1. 过去24小时市场热度（有多少新币上榜）
+    2. 历史最佳做空时间窗口
     """
-    try:
-        # 1. 筛选所有开仓记录
-        df = history_df[history_df['Type'] == 'OPEN'].copy()
-        if df.empty: return "暂无开仓数据"
+    # 筛选开仓数据
+    df = history_df[history_df['Type'] == 'OPEN'].copy()
+    if df.empty: return "", ""
 
-        # 2. 转换时间
-        df['Time'] = pd.to_datetime(df['Time'])
-        df['Price'] = pd.to_numeric(df['Price'], errors='coerce')
-        df = df.dropna(subset=['Price'])
+    # 数据转换
+    df['Time'] = pd.to_datetime(df['Time'])
+    df['Price'] = pd.to_numeric(df['Price'], errors='coerce')
+    df = df.dropna(subset=['Price'])
+
+    # --- 分析 1: 昨日市场复盘 (Yesterday's Review) ---
+    now = datetime.now()
+    yesterday = now - timedelta(hours=24)
+    
+    # 筛选过去24小时的数据
+    recent_df = df[df['Time'] > yesterday].copy()
+    
+    daily_review_md = ""
+    if not recent_df.empty:
+        # 统计去重后的币种数量
+        unique_coins = recent_df['Symbol'].unique()
+        coin_count = len(unique_coins)
         
-        # 3. 按币种和日期分组 (区分同一个币在不同日期的行情)
-        # 逻辑：找到每个币每天第一次出现的时间(T0)，对比后续时间(Tn)的价格变化
-        df['Date'] = df['Time'].dt.date
-        grouped = df.groupby(['Symbol', 'Date'])
+        # 统计最活跃的时间段 (东八区)
+        recent_df['Hour_CN'] = (recent_df['Time'] + timedelta(hours=8)).dt.hour
+        busy_hour = recent_df['Hour_CN'].mode()[0]
         
-        results = []
+        # 列出前5个新上榜的币
+        top_coins_str = ", ".join([s.replace('USDT','') for s in unique_coins[:5]])
         
-        for (symbol, date), group in grouped:
-            if len(group) < 2: continue # 只有一个数据点，无法对比
+        daily_review_md = f"""
+**🔥 过去24h复盘**:
+- **上榜数量**: 共 {coin_count} 个新币
+- **爆发时间**: {busy_hour}:00 (东八区) 此时上榜最多
+- **活跃币种**: {top_coins_str}...
+"""
+    else:
+        daily_review_md = "**🔥 过去24h复盘**: 无开仓数据 (市场冷清)"
+
+    # --- 分析 2: 最佳做空时间 (Time Decay Alpha) ---
+    # 使用全量历史数据
+    df['Date'] = df['Time'].dt.date
+    grouped = df.groupby(['Symbol', 'Date'])
+    
+    results = []
+    
+    for (symbol, date), group in grouped:
+        if len(group) < 2: continue 
+        
+        group = group.sort_values('Time')
+        t0_price = group.iloc[0]['Price']
+        t0_time = group.iloc[0]['Time']
+        
+        for i in range(1, len(group)):
+            curr = group.iloc[i]
+            hours_diff = (curr['Time'] - t0_time).total_seconds() / 3600.0
             
-            group = group.sort_values('Time')
-            t0 = group.iloc[0]
-            t0_price = t0['Price']
-            t0_time = t0['Time']
+            # (当前价 - 初始价) / 初始价
+            # 正数 = 涨了 (说明做空早了)
+            # 负数 = 跌了 (说明开始赚钱了)
+            pct_change = ((curr['Price'] - t0_price) / t0_price) * 100
             
-            for i in range(1, len(group)):
-                curr = group.iloc[i]
-                hours_diff = (curr['Time'] - t0_time).total_seconds() / 3600.0
-                
-                # 涨跌幅：(当前价 - 初始价) / 初始价
-                # 正数：代表价格涨了 -> 说明当初没空是对的，"等一等"更好
-                # 负数：代表价格跌了 -> 说明当初没空亏了，"立即空"更好
-                pct_change = ((curr['Price'] - t0_price) / t0_price) * 100
-                
-                results.append({
-                    'delay': int(round(hours_diff)),
-                    'change': pct_change
-                })
-        
-        if not results: return "数据样本不足，无法分析时间规律"
-        
+            results.append({
+                'delay': int(round(hours_diff)),
+                'change': pct_change
+            })
+            
+    best_time_md = ""
+    if results:
         res_df = pd.DataFrame(results)
-        
-        # 4. 按延迟小时数聚合统计
+        # 按小时聚合，计算平均涨跌幅
         summary = res_df.groupby('delay')['change'].agg(['mean', 'count']).reset_index()
-        summary = summary[summary['count'] >= 3] # 过滤掉样本太少的时段
+        summary = summary[summary['count'] >= 3] # 过滤小样本
         
-        # 5. 生成表格
-        md = "| 延迟 | 平均涨幅 | 建议 |\n| :--: | :--: | :--: |\n"
-        
-        best_delay = 0
-        max_pump = -999
+        best_time_md = "| 延时 | 均价变动 | 建议 |\n| :--: | :--: | :--: |\n"
         
         for _, row in summary.iterrows():
             hour = int(row['delay'])
             avg_chg = row['mean']
             
-            # 简单建议逻辑
-            advice = ""
-            if avg_chg > 2.0: advice = "⏳ 忍住(还在涨)"
-            elif avg_chg > 5.0: advice = "⚠️ 极其危险"
-            elif avg_chg < 0: advice = "📉 可空(已转跌)"
-            else: advice = "👀 观察"
+            # 这里的涨幅是相对于第一次上榜时的价格
+            # 如果 avg_chg > 0，说明还在涨，空早了
+            # 如果 avg_chg 开始下降，说明见顶了
             
-            if avg_chg > max_pump:
-                max_pump = avg_chg
-                best_delay = hour
+            status = ""
+            if avg_chg > 5.0: status = "⛔️ 暴涨中"
+            elif avg_chg > 1.0: status = "⏳ 还在涨"
+            elif avg_chg < -1.0: status = "✅ 已转跌"
+            else: status = "👀 观察"
             
-            change_str = f"{avg_chg:+.1f}%"
-            md += f"| {hour}h | {change_str} | {advice} |\n"
-            
-        return md, best_delay
-        
-    except Exception as e:
-        return f"分析出错: {e}", 0
+            best_time_md += f"| +{hour}h | {avg_chg:+.1f}% | {status} |\n"
+    else:
+        best_time_md = "数据积累中，暂无足够样本分析时间规律。"
+
+    return daily_review_md, best_time_md
 
 def analyze_strategies():
-    print("📊 开始生成策略分析报告...")
+    print("📊 开始生成详细分析报告...")
 
     # 1. 定义表头
     HISTORY_COLS = [
@@ -154,22 +174,25 @@ def analyze_strategies():
     # 3. 预处理
     history_df['Strategy_ID'] = pd.to_numeric(history_df['Strategy_ID'], errors='coerce')
     history_df['Round_PnL'] = pd.to_numeric(history_df['Round_PnL'], errors='coerce').fillna(0)
-    
-    # --- 模块 A: 策略排行榜 ---
-    stats_list = []
-    # (此部分逻辑保持不变，为了节省篇幅简写，实际运行请保留原来的循环逻辑)
-    # ... 您原来的策略排名循环逻辑 ...
-    # 为了完整性，我还是把循环写在这里:
-    close_events = history_df[history_df['Type'] == 'CLOSE'].copy()
     history_df['Pos_PnL'] = pd.to_numeric(history_df['Pos_PnL'], errors='coerce').fillna(0)
+
+    # --- 模块 1: 市场深层分析 (Review & Alpha) ---
+    daily_review_str, best_time_str = analyze_market_mechanics(history_df)
+
+    # --- 模块 2: 策略排行榜 ---
+    # 备用：计算基于 CLOSE 的统计
+    close_events = history_df[history_df['Type'] == 'CLOSE'].copy()
     rounds_fallback = pd.DataFrame()
     if not close_events.empty:
         rounds_fallback = close_events.groupby(['Strategy_ID', 'Time'])['Pos_PnL'].sum().reset_index()
 
+    stats_list = []
     for i in range(24):
         s_id = str(i)
-        # 简化版逻辑：只取 ROUND_RES 或 Fallback
+        
+        # 优先取 ROUND_RES
         rounds_res = history_df[(history_df['Strategy_ID'] == i) & (history_df['Type'] == 'ROUND_RES')]
+        
         if len(rounds_res) > 0:
             pnl = rounds_res['Round_PnL'].sum()
             wins = len(rounds_res[rounds_res['Round_PnL'] > 0])
@@ -181,7 +204,12 @@ def analyze_strategies():
             total = len(strat_r)
         else:
             pnl = 0; wins = 0; total = 0
-            
+            # 终极备用：净值差额
+            col_name = f"S_{i}"
+            if col_name in equity_df.columns:
+                series = pd.to_numeric(equity_df[col_name], errors='coerce').dropna()
+                if len(series) > 0: pnl = series.iloc[-1] - 1000
+
         win_rate = (wins/total*100) if total > 0 else 0
         
         # Max DD
@@ -195,30 +223,30 @@ def analyze_strategies():
     
     # 生成排行榜表格
     rank_table = "| ID | 胜率 | 总盈 | 回撤 |\n| :--: | :--: | :--: | :--: |\n"
-    top_performer = ""
+    top_id = ""
     for idx, s in enumerate(stats_list):
-        if idx == 0: top_performer = f"S{s['id']} ({s['pnl']:.0f}U)"
-        rank_table += f"| S{s['id']} | {s['wr']:.0f}% | {s['pnl']:.0f} | {s['dd']:.1f}% |\n"
+        if idx == 0: top_id = f"S{s['id']}"
+        # 只显示前5名和最后3名，避免表格过长
+        if idx < 5 or idx >= 21:
+            rank_table += f"| S{s['id']} | {s['wr']:.0f}% | {s['pnl']:.0f} | {s['dd']:.1f}% |\n"
+        if idx == 5:
+            rank_table += "| ... | ... | ... | ... |\n"
 
-    # --- 模块 B: 最佳做空时间分析 (新功能) ---
-    time_analysis_md, best_hour = analyze_best_short_time(history_df)
-
-    # 4. 发送微信
+    # --- 4. 组装最终报告 ---
     current_time = datetime.now().strftime("%m-%d %H:%M")
     
-    title = f"🏆 策略日报: {top_performer}"
+    title = f"📈 策略日报: {top_id} 领跑"
     desp = f"""
-**生成时间**: {current_time}
-
-### 1️⃣ ⏳ 最佳做空时机分析
-*(基于历史数据：币种上榜后N小时的平均涨幅)*
-如果平均涨幅为正，说明**做空太早了**，建议等待。
-{time_analysis_md}
-**💡 结论**: 历史数据显示，上榜后 **{best_hour}小时** 往往是最高点，此时进场胜率最高。
+**生成时间**: {current_time} (UTC+8)
 
 ---
+{daily_review_str}
 
-### 2️⃣ 📊 策略实盘排行榜
+### ⏳ 最佳做空时机 (Alpha)
+*(基于历史全量数据分析: 上榜后N小时的价格变化)*
+{best_time_str}
+
+### 🏆 策略排行榜 (Top 5 & Bottom 3)
 {rank_table}
     """
     
