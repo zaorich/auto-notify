@@ -5,27 +5,16 @@ import requests
 import urllib.parse
 from datetime import datetime
 
-# =================配置区域=================
+# ================= 配置区域 =================
 HISTORY_FILE = 'strategy_history.csv'
 EQUITY_FILE = 'equity_curve.csv'
 SERVERCHAN_KEY = os.environ.get("SERVERCHAN_KEY")
-# =========================================
-
-def calculate_max_drawdown(equity_series):
-    """计算最大回撤"""
-    if len(equity_series) < 1: return 0.0
-    # 确保数据是数值型
-    equity_series = pd.to_numeric(equity_series, errors='coerce').fillna(method='ffill')
-    
-    peak = equity_series.cummax()
-    drawdown = (equity_series - peak) / peak
-    return drawdown.min() * 100
+# ===========================================
 
 def send_wechat_msg(title, content):
     """发送微信通知"""
     if not SERVERCHAN_KEY:
-        print("⚠️ 未配置 SERVERCHAN_KEY，只打印不发送。")
-        print(f"--- {title} ---\n{content}")
+        print(f"⚠️ 未配置 SERVERCHAN_KEY，只打印不发送。\n标题: {title}\n内容:\n{content}")
         return
 
     url = f"https://sctapi.ftqq.com/{SERVERCHAN_KEY}.send"
@@ -33,144 +22,165 @@ def send_wechat_msg(title, content):
     try:
         data = urllib.parse.urlencode(params).encode('utf-8')
         req = requests.post(url, data=params)
-        print(f"✅ 微信推送状态: {req.status_code}")
+        print(f"✅ 微信推送完成: {req.status_code}")
     except Exception as e:
         print(f"❌ 微信发送失败: {e}")
 
-def analyze_strategies():
-    print(f"正在读取数据文件...")
+def calculate_max_drawdown(equity_series):
+    """计算最大回撤 (Max Drawdown)"""
+    if len(equity_series) < 1: return 0.0
+    # 强制转为数值型，处理脏数据
+    equity_series = pd.to_numeric(equity_series, errors='coerce').fillna(method='ffill')
     
-    if not os.path.exists(HISTORY_FILE) or not os.path.exists(EQUITY_FILE):
-        print(f"❌ 错误: 找不到数据文件！")
-        return
+    # 累计最大值
+    peak = equity_series.cummax()
+    # 当前回撤幅度
+    drawdown = (equity_series - peak) / peak
+    # 返回最小的那个值（即跌得最深的点），转为百分比
+    return drawdown.min() * 100
 
-    try:
-        # --- [1. 读取历史记录] ---
-        # 强制指定最新的 14 个列名
-        NEW_HEADERS = [
-            "Time", "Strategy_ID", "Type", "Symbol", "Price", "15m_High", 
-            "Amount", "Pos_PnL", "Strategy_Equity", "Total_Invested", 
-            "Used_Margin", "Round_PnL", "24h_Change", "Note"
-        ]
+def robust_read_csv(filename, col_names):
+    """鲁棒的CSV读取函数，专门处理列数不一致的问题"""
+    if not os.path.exists(filename):
+        print(f"❌ 文件不存在: {filename}")
+        return pd.DataFrame()
         
-        history_df = pd.read_csv(
-            HISTORY_FILE, 
-            names=NEW_HEADERS,   # 使用新列名
-            header=None,         # ⚠️ 关键：不读取文件自带的表头
-            skiprows=1,          # ⚠️ 关键：物理跳过第一行（旧表头）
-            engine='python',     # 使用宽容模式
+    try:
+        df = pd.read_csv(
+            filename,
+            names=col_names,     # 强制使用新表头
+            header=None,         # 不读取文件自带表头
+            skiprows=1,          # 跳过第一行
+            engine='python',     # 使用Python引擎处理变长列
             on_bad_lines='skip'  # 跳过坏行
         )
-        
-        # --- [2. 读取净值曲线] ---
-        # 强制指定最新的 27 个列名 (Time + 24个策略 + Total_Equity + Total_Invested)
-        EQUITY_HEADERS = ['Time'] + [f'S_{i}' for i in range(24)] + ['Total_Equity', 'Total_Invested']
-        
-        equity_df = pd.read_csv(
-            EQUITY_FILE,
-            names=EQUITY_HEADERS, # 使用新列名
-            header=None,          # 不读旧表头
-            skiprows=1,           # 跳过第一行
-            engine='python',
-            on_bad_lines='skip'
-        )
-        
+        return df
     except Exception as e:
-        print(f"❌ 读取CSV失败: {e}")
-        import traceback
-        traceback.print_exc()
-        return
+        print(f"❌ 读取 {filename} 失败: {e}")
+        return pd.DataFrame()
 
-    stats_list = []
-    
-    # 确保 Strategy_ID 是数字类型
+def analyze_strategies():
+    print("📊 开始生成策略分析报告...")
+
+    # 1. 定义最新的表头结构
+    HISTORY_COLS = [
+        "Time", "Strategy_ID", "Type", "Symbol", "Price", "15m_High", 
+        "Amount", "Pos_PnL", "Strategy_Equity", "Total_Invested", 
+        "Used_Margin", "Round_PnL", "24h_Change", "Note"
+    ]
+    EQUITY_COLS = ['Time'] + [f'S_{i}' for i in range(24)] + ['Total_Equity', 'Total_Invested']
+
+    # 2. 读取数据
+    history_df = robust_read_csv(HISTORY_FILE, HISTORY_COLS)
+    equity_df = robust_read_csv(EQUITY_FILE, EQUITY_COLS)
+
+    if history_df.empty: return
+
+    # 3. 数据预处理
     history_df['Strategy_ID'] = pd.to_numeric(history_df['Strategy_ID'], errors='coerce')
     
-    # --- 数据分析循环 ---
+    stats_list = []
+
+    # 4. 循环分析 24 个策略
     for i in range(24):
         s_id = str(i)
         
-        # 1. 基础数据 (History)
+        # --- A. 基础收益分析 (基于 History) ---
+        # 优先使用 ROUND_RES (本轮结算) 数据
         rounds = history_df[
             (history_df['Strategy_ID'] == i) & 
             (history_df['Type'] == 'ROUND_RES')
         ]
         
-        total_rounds = len(rounds)
+        # 如果没有 ROUND_RES (老数据)，尝试用 CLOSE 估算（简略版）
+        # 这里为了准确性，我们主要依赖 ROUND_RES，如果没有则显示为 0
+        pnl_series = pd.to_numeric(rounds['Round_PnL'], errors='coerce').fillna(0)
         
-        if total_rounds > 0:
-            # 确保 Round_PnL 是数值型
-            pnl_series = pd.to_numeric(rounds['Round_PnL'], errors='coerce').fillna(0)
-            
-            win_rounds = len(pnl_series[pnl_series > 0])
-            loss_rounds = len(pnl_series[pnl_series <= 0])
-            win_rate = (win_rounds / total_rounds) * 100
-            total_pnl = pnl_series.sum()
-            
-            avg_win = pnl_series[pnl_series > 0].mean() if win_rounds > 0 else 0
-            avg_loss = abs(pnl_series[pnl_series <= 0].mean()) if loss_rounds > 0 else 0
-            pnl_ratio = (avg_win / avg_loss) if avg_loss > 0 else 99.9
-        else:
-            # 如果没有结算数据，尝试用净值估算当前浮动盈亏
-            win_rate = 0
-            total_pnl = 0
-            pnl_ratio = 0
-            # 尝试从 equity_df 获取最新净值 - 1000
+        total_rounds = len(pnl_series)
+        win_rounds = len(pnl_series[pnl_series > 0])
+        total_pnl = pnl_series.sum()
+        
+        # 补救措施：如果 ROUND_RES 为空，尝试从净值曲线取最新值算总盈亏
+        if total_rounds == 0:
             col_name = f"S_{i}"
-            if col_name in equity_df.columns and len(equity_df) > 0:
+            if col_name in equity_df.columns:
                 try:
-                    last_equity = pd.to_numeric(equity_df[col_name].iloc[-1], errors='coerce')
+                    # 取最后一行有效的净值
+                    last_equity = pd.to_numeric(equity_df[col_name], errors='coerce').dropna().iloc[-1]
+                    # 假设初始投入是 1000
                     total_pnl = last_equity - 1000
                 except:
                     pass
 
-        # 2. 风险数据 (Equity Curve)
-        col_name = f"S_{i}"
+        # 胜率计算
+        win_rate = (win_rounds / total_rounds * 100) if total_rounds > 0 else 0.0
+        
+        # 盈亏比
+        avg_win = pnl_series[pnl_series > 0].mean() if win_rounds > 0 else 0
+        avg_loss = abs(pnl_series[pnl_series <= 0].mean()) if (total_rounds - win_rounds) > 0 else 0
+        pnl_ratio = (avg_win / avg_loss) if avg_loss > 0 else 0.0
+
+        # --- B. 风险分析 (基于 Equity Curve) ---
         max_dd = 0.0
+        col_name = f"S_{i}"
         if col_name in equity_df.columns:
-            series = equity_df[col_name]
-            max_dd = calculate_max_drawdown(series)
-            
+            max_dd = calculate_max_drawdown(equity_df[col_name])
+
         stats_list.append({
             'id': s_id,
             'rounds': total_rounds,
+            'wins': win_rounds,
             'win_rate': win_rate,
             'pnl': total_pnl,
             'max_dd': max_dd,
             'pnl_ratio': pnl_ratio
         })
 
-    # --- 生成报告内容 ---
-    # 如果所有策略都还没跑完一轮，至少展示当前的浮动盈亏排名
+    # 5. 排序与评级 (按总盈亏降序)
     stats_list.sort(key=lambda x: x['pnl'], reverse=True)
+
+    # 6. 生成 Markdown 报告
+    # 表头
+    md_table = "| ID | 胜率 (赢/总) | 总盈 | 回撤 | 评级 |\n"
+    md_table += "| :--: | :--: | :--: | :--: | :--: |\n"
     
-    md_content = "| ID | 胜率 | 总盈 | 回撤 | 盈亏比 |\n| :--: | :--: | :--: | :--: | :--: |\n"
-    
-    top_performer = ""
+    champion_name = "暂无"
     
     for idx, s in enumerate(stats_list):
-        if idx == 0: top_performer = f"S{s['id']} (收益 {s['pnl']:.0f}U)"
+        # 智能评级标签
+        tag = ""
+        if s['pnl'] > 0 and s['max_dd'] > -10 and s['win_rate'] >= 66: tag = "🏆稳健"
+        elif s['pnl'] > 500: tag = "🚀暴利"
+        elif s['pnl'] < -200: tag = "💀巨亏"
+        elif s['max_dd'] < -30: tag = "⚠️高危"
+        else: tag = "-"
         
+        # 记录冠军 (排除没跑过数据的)
+        if idx == 0 and s['pnl'] != 0:
+            champion_name = f"S{s['id']}"
+
+        # 格式化数据
+        # 胜率显示为: 66% (2/3)
+        win_str = f"{s['win_rate']:.0f}% ({s['wins']}/{s['rounds']})"
         pnl_str = f"{s['pnl']:+.0f}"
         dd_str = f"{s['max_dd']:.1f}%"
-        pr_str = f"{s['pnl_ratio']:.1f}"
         
-        md_content += f"| S{s['id']} | {s['win_rate']:.0f}% | {pnl_str} | {dd_str} | {pr_str} |\n"
+        md_table += f"| S{s['id']} | {win_str} | {pnl_str} | {dd_str} | {tag} |\n"
 
-    current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
+    current_time = datetime.now().strftime("%m-%d %H:%M")
     
-    title = f"🏆 策略风云榜: {top_performer}"
+    title = f"📊 策略大比武: {champion_name} 领跑"
     desp = f"""
-**生成时间**: {current_time} (UTC+8)
-**参评策略**: {len(stats_list)} 个
+**生成时间**: {current_time}
+**统计维度**: 胜率、累计盈亏、最大回撤
 
 ---
-{md_content}
+{md_table}
 ---
-**指标说明**:
-1. **总盈**: 历史累计净利润 (含浮动)。
-2. **回撤**: 越接近0越好。
-3. **盈亏比**: 平均赚的钱 / 平均亏的钱。
+**💡 如何选择最优策略?**
+1. **稳健型**: 找 **胜率高** 且 **回撤小** (例如 >-10%) 的。
+2. **激进型**: 找 **总盈最高** 的，但要小心回撤。
+3. **避雷**: 远离 **盈亏比低** (赢小输大) 的策略。
     """
     
     send_wechat_msg(title, desp)
