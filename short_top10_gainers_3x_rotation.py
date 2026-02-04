@@ -23,7 +23,7 @@ INITIAL_UNIT = 1000.0     # 标准开仓/复活金额
 POSITIONS_COUNT = 10      # 持仓数量
 LEVERAGE = 3.0            # 杠杆倍数
 MIN_ALIVE_BALANCE = 10.0  # “存活”阈值
-MAX_DELAY_SECONDS = 3600  # 最大延迟容忍时间(秒)，超过只平仓不开仓
+MAX_DELAY_SECONDS = 3600  # 最大延迟容忍时间(秒)
 
 HEADERS = {'User-Agent': 'Mozilla/5.0'}
 SERVERCHAN_KEY = os.environ.get("SERVERCHAN_KEY")
@@ -129,8 +129,9 @@ def log_to_csv(record_type, strategy_id, symbol, price, high_price, amount, pos_
     round_pnl_val = float(round_pnl)
     change_pct_val = float(change_pct)
     
-    # 关键事件白名单
-    CRITICAL_EVENTS = ["OPEN", "CLOSE", "LIQUIDATION", "REPLENISH", "WITHDRAW"]
+    # === [关键过滤逻辑] ===
+    # 增加 ROUND_RES 到白名单
+    CRITICAL_EVENTS = ["OPEN", "CLOSE", "LIQUIDATION", "REPLENISH", "WITHDRAW", "ROUND_RES"]
     
     if record_type not in CRITICAL_EVENTS:
         return 
@@ -138,7 +139,8 @@ def log_to_csv(record_type, strategy_id, symbol, price, high_price, amount, pos_
     change_str = ""
     if record_type == "OPEN":
         change_str = f"涨:{change_pct_val:>+5.1f}%"
-        
+    
+    # 控制台打印
     print(f"📝 [CSV] {record_type:<10} S{strategy_id:<2} {symbol:<8} 净:{equity_val:.0f} 投:{invested_val:.0f} 押:{used_margin_val:.0f} 轮:{round_pnl_val:+.0f} {change_str} | {note}")
 
     try:
@@ -251,24 +253,28 @@ def check_risk_management(opener, data, market_map):
     return liquidated_ids
 
 def execute_single_strategy(s_id, strategy, opener, market_map, top_10, current_utc, target_date_str, is_late_close_only, delay_str):
-    """
-    delay_str: 延迟时长的字符串 (例如 "4.5h")，用于日志记录
-    """
     print(f"\n⚡ [操作] 策略 {s_id} (延迟模式: {'是' if is_late_close_only else '否'}, 时长: {delay_str})")
     
     total_close_pnl = 0
     wallet_balance = strategy['balance']
     invested = strategy['total_invested']
+    current_ts = int(time.time())
     
     # 1. 平旧仓
     if wallet_balance > 0 and strategy['positions']:
         used_margin = sum([p.get('margin', 0) for p in strategy['positions']])
         
-        # 决定平仓的 Note 内容
+        # 计算持仓时长（取第一个仓位的时间）
+        duration_hours = 0.0
+        if strategy['positions']:
+            entry_time = strategy['positions'][0].get('entry_time', 0)
+            if entry_time > 0:
+                duration_hours = (current_ts - entry_time) / 3600.0
+
         close_note = "轮动平仓"
         if is_late_close_only:
             close_note = f"延迟{delay_str}平仓"
-        elif delay_str != "0.0h": # 有轻微延迟但正常轮动
+        elif delay_str != "0.0h":
             close_note = f"轮动平仓(延{delay_str})"
             
         for pos in strategy['positions']:
@@ -281,6 +287,17 @@ def execute_single_strategy(s_id, strategy, opener, market_map, top_10, current_
             temp_equity = wallet_balance + total_close_pnl
             
             log_to_csv("CLOSE", s_id, symbol, exit_price, exit_price, amount, pnl, temp_equity, invested, used_margin, pnl, 0.0, close_note)
+
+        # --- [新增] 记录本轮汇总 (Round Result) ---
+        roi_pct = 0.0
+        if used_margin > 0:
+            roi_pct = (total_close_pnl / used_margin) * 100
+        
+        summary_note = f"本轮结算: 利润{total_close_pnl:+.1f}U, ROI:{roi_pct:+.1f}%, 持仓{duration_hours:.1f}h"
+        
+        # 记录汇总行 (Type=ALL 表示不针对特定币种)
+        log_to_csv("ROUND_RES", s_id, "ALL", 0, 0, 0, total_close_pnl, wallet_balance + total_close_pnl, invested, used_margin, total_close_pnl, 0.0, summary_note)
+        # ---------------------------------------
 
         strategy['balance'] += total_close_pnl
         strategy['positions'] = []
@@ -347,7 +364,7 @@ def execute_single_strategy(s_id, strategy, opener, market_map, top_10, current_
 
 def scan_and_execute_strategies(opener, data, market_map, top_10):
     rotated_ids = []
-    closed_only_info = {} # 存储 {id: delay_str}
+    closed_only_info = {} 
     
     current_utc = datetime.utcnow()
     print(f"\n🔍 [扫描] 当前UTC时间: {current_utc.strftime('%Y-%m-%d %H:%M:%S')}")
@@ -465,7 +482,6 @@ def report_to_wechat(opener, data, market_map, rotated_ids, closed_only_info, li
             liq_mark = f" 💀x{liq_count}" if liq_count > 0 else ""
             
             if s_id in closed_only_info:
-                # 获取具体的延迟时长
                 delay_val = closed_only_info[s_id]
                 detail_text += f"\n🛑 **S{s_id}** (延迟 {delay_val}): 仅平仓, 等待明日重启。\n"
             elif pos_len > 0:
