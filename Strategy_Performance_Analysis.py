@@ -8,12 +8,15 @@ from datetime import datetime
 # =================配置区域=================
 HISTORY_FILE = 'strategy_history.csv'
 EQUITY_FILE = 'equity_curve.csv'
-SERVERCHAN_KEY = os.environ.get("SERVERCHAN_KEY") # 从环境变量读取 Key
+SERVERCHAN_KEY = os.environ.get("SERVERCHAN_KEY")
 # =========================================
 
 def calculate_max_drawdown(equity_series):
     """计算最大回撤"""
     if len(equity_series) < 1: return 0.0
+    # 确保数据是数值型
+    equity_series = pd.to_numeric(equity_series, errors='coerce').fillna(method='ffill')
+    
     peak = equity_series.cummax()
     drawdown = (equity_series - peak) / peak
     return drawdown.min() * 100
@@ -26,7 +29,6 @@ def send_wechat_msg(title, content):
         return
 
     url = f"https://sctapi.ftqq.com/{SERVERCHAN_KEY}.send"
-    # Server酱支持 Markdown，但表格支持有限，这里用代码块包裹以保持对齐
     params = {'title': title, 'desp': content}
     try:
         data = urllib.parse.urlencode(params).encode('utf-8')
@@ -43,19 +45,42 @@ def analyze_strategies():
         return
 
     try:
-        history_df = pd.read_csv(HISTORY_FILE)
+        # --- [核心修复点] ---
+        # 显式定义最新的 14 列表头，防止因旧数据列数不一致报错
+        NEW_HEADERS = [
+            "Time", "Strategy_ID", "Type", "Symbol", "Price", "15m_High", 
+            "Amount", "Pos_PnL", "Strategy_Equity", "Total_Invested", 
+            "Used_Margin", "Round_PnL", "24h_Change", "Note"
+        ]
+        
+        history_df = pd.read_csv(
+            HISTORY_FILE, 
+            names=NEW_HEADERS,   # 强制使用新表头
+            header=0,            # 忽略文件里的第一行(因为那是旧表头)
+            on_bad_lines='skip', # 跳过极少数无法解析的坏行
+            low_memory=False
+        )
+        
         equity_df = pd.read_csv(EQUITY_FILE)
+        
     except Exception as e:
         print(f"❌ 读取CSV失败: {e}")
+        # 打印更多调试信息
+        import traceback
+        traceback.print_exc()
         return
 
     stats_list = []
+    
+    # 确保 Strategy_ID 是数字类型，便于筛选
+    history_df['Strategy_ID'] = pd.to_numeric(history_df['Strategy_ID'], errors='coerce')
     
     # --- 数据分析循环 ---
     for i in range(24):
         s_id = str(i)
         
         # 1. 基础数据 (History)
+        # 筛选出该策略所有的结算记录 (ROUND_RES)
         rounds = history_df[
             (history_df['Strategy_ID'] == i) & 
             (history_df['Type'] == 'ROUND_RES')
@@ -64,13 +89,16 @@ def analyze_strategies():
         total_rounds = len(rounds)
         if total_rounds == 0: continue
             
-        win_rounds = len(rounds[rounds['Round_PnL'] > 0])
-        loss_rounds = len(rounds[rounds['Round_PnL'] <= 0])
-        win_rate = (win_rounds / total_rounds) * 100
-        total_pnl = rounds['Round_PnL'].sum()
+        # 确保 Round_PnL 是数值型
+        pnl_series = pd.to_numeric(rounds['Round_PnL'], errors='coerce').fillna(0)
         
-        avg_win = rounds[rounds['Round_PnL'] > 0]['Round_PnL'].mean() if win_rounds > 0 else 0
-        avg_loss = abs(rounds[rounds['Round_PnL'] <= 0]['Round_PnL'].mean()) if loss_rounds > 0 else 0
+        win_rounds = len(pnl_series[pnl_series > 0])
+        loss_rounds = len(pnl_series[pnl_series <= 0])
+        win_rate = (win_rounds / total_rounds) * 100
+        total_pnl = pnl_series.sum()
+        
+        avg_win = pnl_series[pnl_series > 0].mean() if win_rounds > 0 else 0
+        avg_loss = abs(pnl_series[pnl_series <= 0].mean()) if loss_rounds > 0 else 0
         pnl_ratio = (avg_win / avg_loss) if avg_loss > 0 else 99.9
         
         # 2. 风险数据 (Equity Curve)
@@ -90,34 +118,29 @@ def analyze_strategies():
         })
 
     # --- 生成报告内容 ---
+    if not stats_list:
+        print("⚠️ 暂无有效结算数据 (ROUND_RES)，请等待策略至少完成一轮轮动。")
+        return
+
     # 按总收益降序排序
     stats_list.sort(key=lambda x: x['pnl'], reverse=True)
     
     # 构建 Markdown 表格
-    # 注意：为了在手机上能看清，精简了列名
     md_content = "| ID | 胜率 | 总盈 | 回撤 | 盈亏比 |\n| :--: | :--: | :--: | :--: | :--: |\n"
     
     top_performer = ""
     
     for idx, s in enumerate(stats_list):
-        # 评级标签
-        tag = ""
-        pnl = s['pnl']
-        dd = s['max_dd']
-        wr = s['win_rate']
+        if idx == 0: top_performer = f"S{s['id']} (收益 {s['pnl']:.0f}U)"
         
-        if idx == 0: top_performer = f"S{s['id']} (收益 {pnl:.0f}U)" # 记录冠军
-        
-        # 格式化数据
-        pnl_str = f"{pnl:+.0f}"
-        dd_str = f"{dd:.1f}%"
+        pnl_str = f"{s['pnl']:+.0f}"
+        dd_str = f"{s['max_dd']:.1f}%"
         pr_str = f"{s['pnl_ratio']:.1f}"
         
-        md_content += f"| S{s['id']} | {wr:.0f}% | {pnl_str} | {dd_str} | {pr_str} |\n"
+        md_content += f"| S{s['id']} | {s['win_rate']:.0f}% | {pnl_str} | {dd_str} | {pr_str} |\n"
 
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
     
-    # 组合最终消息
     title = f"🏆 策略风云榜: {top_performer}"
     desp = f"""
 **生成时间**: {current_time} (UTC+8)
@@ -127,12 +150,11 @@ def analyze_strategies():
 {md_content}
 ---
 **指标说明**:
-1. **回撤**: 越接近0越好（-5% 优于 -20%）。
-2. **盈亏比**: 大于 1.5 说明赚大亏小。
-3. **稳健冠军**: 需同时满足高胜率+低回撤。
+1. **总盈**: 历史累计净利润。
+2. **回撤**: 越接近0越好。
+3. **盈亏比**: 平均赚的钱 / 平均亏的钱。
     """
     
-    # 发送
     send_wechat_msg(title, desp)
 
 if __name__ == "__main__":
