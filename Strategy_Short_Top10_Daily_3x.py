@@ -116,15 +116,18 @@ def calculate_strategy_equity(strategy, market_map, opener=None, use_high_price=
     equity = wallet_balance + total_unrealized_pnl
     return equity, details
 
-def log_to_csv(record_type, strategy_id, symbol, price, high_price, amount, pos_pnl, equity, total_invested, note=""):
+# --- [修改点] log_to_csv 增加 used_margin 和 round_pnl 参数 ---
+def log_to_csv(record_type, strategy_id, symbol, price, high_price, amount, pos_pnl, equity, total_invested, used_margin, round_pnl, note=""):
     """
-    日志记录函数
+    日志记录函数 (CSV结构升级版)
     """
     file_exists = os.path.isfile(HISTORY_FILE)
     current_time = time.strftime('%Y-%m-%d %H:%M:%S')
     
     equity_val = float(equity)
     invested_val = float(total_invested)
+    used_margin_val = float(used_margin)
+    round_pnl_val = float(round_pnl)
     
     # 关键事件白名单
     CRITICAL_EVENTS = ["OPEN", "CLOSE", "LIQUIDATION", "REPLENISH", "WITHDRAW"]
@@ -132,15 +135,18 @@ def log_to_csv(record_type, strategy_id, symbol, price, high_price, amount, pos_
     if record_type not in CRITICAL_EVENTS:
         return
 
-    # 只有关键事件才会执行到这里
-    print(f"📝 [CSV] {record_type:<10} 策略{strategy_id:<2} {symbol:<8} 净值:{equity_val:.0f} 投入:{invested_val:.0f} | {note}")
+    # 控制台日志也同步显示更多细节
+    print(f"📝 [CSV] {record_type:<10} S{strategy_id:<2} {symbol:<8} 净:{equity_val:.0f} 投:{invested_val:.0f} 押:{used_margin_val:.0f} 轮:{round_pnl_val:+.0f} | {note}")
 
     try:
         with open(HISTORY_FILE, 'a', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
+            # 如果文件不存在，写入新表头
             if not file_exists:
-                writer.writerow(["Time", "Strategy_ID", "Type", "Symbol", "Price", "15m_High", "Amount", "Pos_PnL", "Strategy_Equity", "Total_Invested", "Note"])
-            writer.writerow([current_time, strategy_id, record_type, symbol, price, high_price, amount, pos_pnl, equity_val, invested_val, note])
+                writer.writerow(["Time", "Strategy_ID", "Type", "Symbol", "Price", "15m_High", "Amount", "Pos_PnL", "Strategy_Equity", "Total_Invested", "Used_Margin", "Round_PnL", "Note"])
+            
+            # 写入数据行
+            writer.writerow([current_time, strategy_id, record_type, symbol, price, high_price, amount, pos_pnl, equity_val, invested_val, used_margin_val, round_pnl_val, note])
     except Exception as e:
         print(f"❌ 写入历史CSV失败: {e}")
 
@@ -213,6 +219,13 @@ def check_risk_management(opener, data, market_map):
             
         equity, details = calculate_strategy_equity(strategy, market_map, opener, use_high_price=True)
         invested = strategy.get('total_invested', INITIAL_UNIT)
+        
+        # --- [计算新增指标] ---
+        used_margin = 0
+        if strategy['positions']:
+            used_margin = sum([p.get('margin', 0) for p in strategy['positions']])
+        round_pnl = equity - strategy['balance'] # 本轮浮动盈亏
+        # --------------------
 
         # --- [极简输出逻辑] ---
         if details:
@@ -225,14 +238,15 @@ def check_risk_management(opener, data, market_map):
             
             all_coins_str = " ".join(coin_details_list)
             pnl = equity - invested
-            # 输出一行汇总
-            print(f"   >> S{s_id:<2} 净:{equity:>5.0f} ({pnl:>+5.0f}) | {all_coins_str}")
+            # 输出包含 押金 和 轮盈 的日志
+            print(f"   >> S{s_id:<2} 净:{equity:>5.0f} ({pnl:>+5.0f}) 押:{used_margin:>4.0f} 轮:{round_pnl:>+5.0f} | {all_coins_str}")
         
         if equity <= 0:
             print(f"💥 策略 {s_id} 触发全仓爆仓! 净值归零")
             liquidated_ids.append(s_id)
             for d in details:
-                log_to_csv("LIQUIDATION", s_id, d['symbol'], d['calc_price'], d['calc_price'], d['amount'], d['pnl'], 0, invested, "全仓强平")
+                # 爆仓时，轮盈 = -押金 (即亏光了本轮投入)
+                log_to_csv("LIQUIDATION", s_id, d['symbol'], d['calc_price'], d['calc_price'], d['amount'], d['pnl'], 0, invested, used_margin, -used_margin, "全仓强平")
             
             strategy['balance'] = 0
             strategy['positions'] = []
@@ -249,6 +263,9 @@ def execute_single_strategy(s_id, strategy, opener, market_map, top_10, current_
     
     # 1. 平旧仓
     if wallet_balance > 0 and strategy['positions']:
+        # 记录平仓前的状态
+        used_margin = sum([p.get('margin', 0) for p in strategy['positions']])
+        
         for pos in strategy['positions']:
             symbol = pos['symbol']
             entry = float(pos['entry_price'])
@@ -257,7 +274,9 @@ def execute_single_strategy(s_id, strategy, opener, market_map, top_10, current_
             pnl = (entry - exit_price) * amount
             total_close_pnl += pnl
             temp_equity = wallet_balance + total_close_pnl
-            log_to_csv("CLOSE", s_id, symbol, exit_price, exit_price, amount, pnl, temp_equity, invested, "轮动平仓")
+            
+            # 平仓时的 Round PnL 就是这笔交易的 PnL
+            log_to_csv("CLOSE", s_id, symbol, exit_price, exit_price, amount, pnl, temp_equity, invested, used_margin, pnl, "轮动平仓")
 
         strategy['balance'] += total_close_pnl
         strategy['positions'] = []
@@ -276,7 +295,7 @@ def execute_single_strategy(s_id, strategy, opener, market_map, top_10, current_
         strategy['balance'] = INITIAL_UNIT
         strategy['total_invested'] += INITIAL_UNIT
         current_equity = strategy['balance']
-        log_to_csv("REPLENISH", s_id, "USDT", 0, 0, 0, 0, current_equity, strategy['total_invested'], "爆仓复活")
+        log_to_csv("REPLENISH", s_id, "USDT", 0, 0, 0, 0, current_equity, strategy['total_invested'], 0, 0, "爆仓复活")
     
     # 4. 回本机制
     elif ENABLE_ROI_PAYBACK and current_equity >= (INITIAL_UNIT * 2):
@@ -284,7 +303,7 @@ def execute_single_strategy(s_id, strategy, opener, market_map, top_10, current_
         strategy['balance'] -= withdraw_amount
         strategy['total_invested'] -= withdraw_amount
         print(f"💰 策略 {s_id} 触发回本: 提取 {withdraw_amount}U")
-        log_to_csv("WITHDRAW", s_id, "USDT", 0, 0, 0, 0, strategy['balance'], strategy['total_invested'], "回本提取")
+        log_to_csv("WITHDRAW", s_id, "USDT", 0, 0, 0, 0, strategy['balance'], strategy['total_invested'], 0, 0, "回本提取")
         current_equity = strategy['balance'] 
 
     # 5. 开新仓
@@ -294,10 +313,11 @@ def execute_single_strategy(s_id, strategy, opener, market_map, top_10, current_
             trading_capital = INITIAL_UNIT
     
     if trading_capital < 1.0: 
-        log_to_csv("SKIP", s_id, "ALL", 0, 0, 0, 0, current_equity, strategy['total_invested'], "资金不足")
+        log_to_csv("SKIP", s_id, "ALL", 0, 0, 0, 0, current_equity, strategy['total_invested'], 0, 0, "资金不足")
     else:
         margin_per_coin = trading_capital / POSITIONS_COUNT
         entry_ts = int(time.time())
+        total_used_margin = trading_capital # 本轮总押金
         
         new_positions = []
         for item in top_10:
@@ -313,7 +333,8 @@ def execute_single_strategy(s_id, strategy, opener, market_map, top_10, current_
                 "leverage": LEVERAGE,
                 "entry_time": entry_ts
             })
-            log_to_csv("OPEN", s_id, symbol, price, price, amount, 0, current_equity, strategy['total_invested'], "开空")
+            # 开仓时，轮盈为 0
+            log_to_csv("OPEN", s_id, symbol, price, price, amount, 0, current_equity, strategy['total_invested'], total_used_margin, 0, "开空")
             
         strategy['positions'] = new_positions
 
@@ -378,8 +399,7 @@ def report_to_wechat(opener, data, market_map, rotated_ids, closed_only_ids, liq
     total_liquidations = 0
     max_profit = -999999
     
-    # --- [表格头更新] ---
-    # 增加 "押金" 和 "轮盈" (本轮浮动盈亏)
+    # 表格增加两列: 押金, 轮盈
     md_table = "| ID | 投入 | 押金 | 净值 | 总盈 | 轮盈 | 爆 |\n| :--: | :--: | :--: | :--: | :--: | :--: | :--: |\n"
     detail_text = ""
     current_ts = int(time.time())
@@ -393,21 +413,13 @@ def report_to_wechat(opener, data, market_map, rotated_ids, closed_only_ids, liq
         invested = strat.get('total_invested', INITIAL_UNIT)
         liq_count = strat.get('liquidation_count', 0)
         
-        # 计算净值和明细
         equity, details = calculate_strategy_equity(strat, market_map, opener, use_high_price=False)
         
-        # --- [新增指标计算] ---
-        # 1. 押金 (Margin Used): 本轮开仓用了多少钱
+        # --- [计算关键指标] ---
         used_margin = 0
         if strat['positions']:
             used_margin = sum([p.get('margin', 0) for p in strat['positions']])
-            
-        # 2. 轮盈 (Round PnL): 当前持有仓位的浮动盈亏
-        # 逻辑：当前净值 - 钱包余额(开仓前的余额)
-        # 注意：equity = balance + unrealized_pnl, 所以 round_pnl = unrealized_pnl
         round_pnl = equity - strat['balance']
-        
-        # 3. 总盈 (Total PnL): 历史总盈亏
         net_pnl = equity - invested
         # ---------------------
         
@@ -417,7 +429,7 @@ def report_to_wechat(opener, data, market_map, rotated_ids, closed_only_ids, liq
         
         if net_pnl > max_profit: max_profit = net_pnl
 
-        # 状态图标逻辑
+        # 状态图标
         icon = "🔴" if net_pnl < 0 else "🟢"
         if equity == 0: icon = "💀" 
         elif s_id in rotated_ids: icon = "🔄"
@@ -426,15 +438,13 @@ def report_to_wechat(opener, data, market_map, rotated_ids, closed_only_ids, liq
         liq_str = str(liq_count) if liq_count > 0 else "-"
         inv_display = f"{invested:.0f}"
         
-        # --- [表格行更新] ---
-        # 格式: ID | 投入 | 押金 | 净值 | 总盈 | 轮盈 | 爆
-        # 轮盈如果为0 (空仓)，显示 -
+        # 格式化显示 (无持仓时显示 - )
         round_pnl_str = f"{round_pnl:+.0f}" if strat['positions'] else "-"
         margin_str = f"{used_margin:.0f}" if strat['positions'] else "-"
         
         md_table += f"| {s_id} | {inv_display} | {margin_str} | {equity:.0f} | {icon}{net_pnl:+.0f} | {round_pnl_str} | {liq_str} |\n"
 
-        # 生成持仓详情
+        # 详情处理
         pos_len = len(strat['positions'])
         should_show_detail = (pos_len > 0) or (s_id in all_action_ids) or (equity==0)
         
@@ -456,8 +466,6 @@ def report_to_wechat(opener, data, market_map, rotated_ids, closed_only_ids, liq
             if s_id in closed_only_ids:
                 detail_text += f"\n🛑 **S{s_id}** (严重延迟 >1h): 仅平仓, 等待明日重启。\n"
             elif pos_len > 0:
-                # --- [详情行更新] ---
-                # 增加本轮数据展示
                 detail_text += f"\n🔷 **{prefix}S{s_id}** (投:{invested:.0f}{liq_mark} 押:{used_margin:.0f} 轮:{round_pnl:+.0f} ⏱️{duration_str}):\n"
                 simple_items = []
                 for d in details:
