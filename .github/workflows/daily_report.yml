@@ -1,0 +1,30 @@
+name: Daily Analysis Report
+
+on:
+  schedule:
+    # UTC 00:00 = 北京时间 08:00
+    - cron: '0 0 * * *'
+  workflow_dispatch: # 允许手动点按钮运行
+
+jobs:
+  analyze-and-report:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      # 这里不需要 fetch-depth: 1，因为默认拉取最新状态即可读取 CSV
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install Dependencies
+      run: |
+        pip install pandas numpy requests
+
+    - name: Run Analysis
+      env:
+        SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
+      run: python Strategy_Performance_Analysis.py
