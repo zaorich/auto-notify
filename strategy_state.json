@@ -164,8 +164,79 @@
   },
   "3": {
     "balance": 1000.0,
-    "positions": [],
-    "last_trade_date": "",
+    "positions": [
+      {
+        "symbol": "ARCUSDT",
+        "entry_price": 0.07522,
+        "margin": 100.0,
+        "amount": 3988.3009837809095,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "OGUSDT",
+        "entry_price": 4.071,
+        "margin": 100.0,
+        "amount": 73.69196757553428,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "GUSDT",
+        "entry_price": 0.004579,
+        "margin": 100.0,
+        "amount": 65516.488316226256,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "CHESSUSDT",
+        "entry_price": 0.02646,
+        "margin": 100.0,
+        "amount": 11337.868480725623,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "BULLAUSDT",
+        "entry_price": 0.02904,
+        "margin": 100.0,
+        "amount": 10330.578512396694,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "SPACEUSDT",
+        "entry_price": 0.006603,
+        "margin": 100.0,
+        "amount": 45433.893684688774,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "ENSOUSDT",
+        "entry_price": 1.3322,
+        "margin": 100.0,
+        "amount": 225.19141270079567,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "ALCHUSDT",
+        "entry_price": 0.0978,
+        "margin": 100.0,
+        "amount": 3067.4846625766872,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "COAIUSDT",
+        "entry_price": 0.3038,
+        "margin": 100.0,
+        "amount": 987.4917709019091,
+        "leverage": 3.0
+      },
+      {
+        "symbol": "ACUUSDT",
+        "entry_price": 0.1647,
+        "margin": 100.0,
+        "amount": 1821.493624772313,
+        "leverage": 3.0
+      }
+    ],
+    "last_trade_date": "2026-02-04",
     "total_invested": 1000.0,
     "liquidation_count": 0
   },
