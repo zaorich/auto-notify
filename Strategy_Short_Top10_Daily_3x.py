@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 # ==========================================
 PROXY_ADDR = "127.0.0.1:10808"
 STATE_FILE = "strategy_state.json"
-HISTORY_FILE = "strategy_history.csv"
+HISTORY_FILE = "strategy_history_1.csv"
 EQUITY_FILE = "equity_curve.csv"
 
 # --- [新功能开关] ---
