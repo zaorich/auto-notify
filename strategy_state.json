@@ -2,7 +2,7 @@
   "0": {
     "balance": 1000.0,
     "positions": [],
-    "last_trade_date": "",
+    "last_trade_date": "2026-02-04",
     "total_invested": 1000.0,
     "liquidation_count": 0
   },
@@ -85,80 +85,9 @@
     "liquidation_count": 0
   },
   "2": {
-    "balance": 1447.9313111827191,
-    "positions": [
-      {
-        "symbol": "AVAAIUSDT",
-        "entry_price": 0.01042,
-        "margin": 144.7931311182719,
-        "amount": 41687.081895855634,
-        "leverage": 3.0
-      },
-      {
-        "symbol": "STABLEUSDT",
-        "entry_price": 0.027079,
-        "margin": 144.7931311182719,
-        "amount": 16041.190345094565,
-        "leverage": 3.0
-      },
-      {
-        "symbol": "HANAUSDT",
-        "entry_price": 0.03765,
-        "margin": 144.7931311182719,
-        "amount": 11537.301284324454,
-        "leverage": 3.0
-      },
-      {
-        "symbol": "UAIUSDT",
-        "entry_price": 0.2003,
-        "margin": 144.7931311182719,
-        "amount": 2168.6440007729193,
-        "leverage": 3.0
-      },
-      {
-        "symbol": "LIGHTUSDT",
-        "entry_price": 0.3534,
-        "margin": 144.7931311182719,
-        "amount": 1229.143727659354,
-        "leverage": 3.0
-      },
-      {
-        "symbol": "MYXUSDT",
-        "entry_price": 5.57,
-        "margin": 144.7931311182719,
-        "amount": 77.98552842994896,
-        "leverage": 3.0
-      },
-      {
-        "symbol": "GASUSDT",
-        "entry_price": 1.952,
-        "margin": 144.7931311182719,
-        "amount": 222.53042692357363,
-        "leverage": 3.0
-      },
-      {
-        "symbol": "\u6211\u8e0f\u9a6c\u6765\u4e86USDT",
-        "entry_price": 0.056419,
-        "margin": 144.7931311182719,
-        "amount": 7699.168601974791,
-        "leverage": 3.0
-      },
-      {
-        "symbol": "1000WHYUSDT",
-        "entry_price": 1.28e-05,
-        "margin": 144.7931311182719,
-        "amount": 33935890.10584498,
-        "leverage": 3.0
-      },
-      {
-        "symbol": "1INCHUSDT",
-        "entry_price": 0.1154,
-        "margin": 144.7931311182719,
-        "amount": 3764.1195264715398,
-        "leverage": 3.0
-      }
-    ],
-    "last_trade_date": "2026-02-02",
+    "balance": 1695.5023439585516,
+    "positions": [],
+    "last_trade_date": "2026-02-04",
     "total_invested": 1000.0,
     "liquidation_count": 0
   },
@@ -945,7 +874,7 @@
   "13": {
     "balance": 0,
     "positions": [],
-    "last_trade_date": "2026-02-01",
+    "last_trade_date": "2026-02-03",
     "total_invested": 1000.0,
     "liquidation_count": 0
   },
