@@ -118,8 +118,7 @@ def calculate_strategy_equity(strategy, market_map, opener=None, use_high_price=
 
 def log_to_csv(record_type, strategy_id, symbol, price, high_price, amount, pos_pnl, equity, total_invested, used_margin, round_pnl, note=""):
     """
-    日志记录函数 (数据存储优化版)
-    原则：只有涉及仓位变动和资金进出的操作才写入CSV。
+    日志记录函数 (修复刷屏版)
     """
     file_exists = os.path.isfile(HISTORY_FILE)
     current_time = time.strftime('%Y-%m-%d %H:%M:%S')
@@ -129,30 +128,27 @@ def log_to_csv(record_type, strategy_id, symbol, price, high_price, amount, pos_
     used_margin_val = float(used_margin)
     round_pnl_val = float(round_pnl)
     
-    # === [关键过滤逻辑] ===
-    # 只有以下关键事件才允许写入文件，其他一律丢弃，不占用存储空间
+    # === [关键修改] ===
+    # 必须先检查白名单，不在白名单里的，连 print 都不许执行
     CRITICAL_EVENTS = ["OPEN", "CLOSE", "LIQUIDATION", "REPLENISH", "WITHDRAW"]
     
     if record_type not in CRITICAL_EVENTS:
-        return # 直接退出，不打印，不写文件
+        return # 直接退出，绝对静默
 
-    # 只有关键事件才会打印到控制台
+    # 只有关键事件才打印到控制台
     print(f"📝 [CSV] {record_type:<10} S{strategy_id:<2} {symbol:<8} 净:{equity_val:.0f} 投:{invested_val:.0f} 押:{used_margin_val:.0f} 轮:{round_pnl_val:+.0f} | {note}")
 
     try:
         with open(HISTORY_FILE, 'a', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
-            # 如果文件不存在，写入新表头
             if not file_exists:
                 writer.writerow(["Time", "Strategy_ID", "Type", "Symbol", "Price", "15m_High", "Amount", "Pos_PnL", "Strategy_Equity", "Total_Invested", "Used_Margin", "Round_PnL", "Note"])
             
-            # 写入数据行
             writer.writerow([current_time, strategy_id, record_type, symbol, price, high_price, amount, pos_pnl, equity_val, invested_val, used_margin_val, round_pnl_val, note])
     except Exception as e:
         print(f"❌ 写入历史CSV失败: {e}")
 
 def record_equity_snapshot(data, market_map):
-    # 净值曲线(Equity Curve)用于画图，建议保留，但它只会每15分钟增加一行，体积可控。
     file_exists = os.path.isfile(EQUITY_FILE)
     current_time = time.strftime('%Y-%m-%d %H:%M:%S')
     
@@ -222,14 +218,12 @@ def check_risk_management(opener, data, market_map):
         equity, details = calculate_strategy_equity(strategy, market_map, opener, use_high_price=True)
         invested = strategy.get('total_invested', INITIAL_UNIT)
         
-        # 指标计算
         used_margin = 0
         if strategy['positions']:
             used_margin = sum([p.get('margin', 0) for p in strategy['positions']])
         round_pnl = equity - strategy['balance'] 
         
         # --- [极简输出逻辑] ---
-        # 只打印监控日志到控制台，不写文件
         if details:
             coin_details_list = []
             for d in details:
@@ -240,13 +234,14 @@ def check_risk_management(opener, data, market_map):
             
             all_coins_str = " ".join(coin_details_list)
             pnl = equity - invested
+            # 这里只用 print，不再调用 log_to_csv("MONITOR")
             print(f"   >> S{s_id:<2} 净:{equity:>5.0f} ({pnl:>+5.0f}) 押:{used_margin:>4.0f} 轮:{round_pnl:>+5.0f} | {all_coins_str}")
         
         if equity <= 0:
             print(f"💥 策略 {s_id} 触发全仓爆仓! 净值归零")
             liquidated_ids.append(s_id)
             for d in details:
-                # 只有爆仓(LIQUIDATION)是关键操作，会写入CSV
+                # 爆仓是关键事件，调用 log_to_csv 会正常打印和记录
                 log_to_csv("LIQUIDATION", s_id, d['symbol'], d['calc_price'], d['calc_price'], d['amount'], d['pnl'], 0, invested, used_margin, -used_margin, "全仓强平")
             
             strategy['balance'] = 0
@@ -274,8 +269,6 @@ def execute_single_strategy(s_id, strategy, opener, market_map, top_10, current_
             pnl = (entry - exit_price) * amount
             total_close_pnl += pnl
             temp_equity = wallet_balance + total_close_pnl
-            
-            # 关键操作：CLOSE -> 写入CSV
             log_to_csv("CLOSE", s_id, symbol, exit_price, exit_price, amount, pnl, temp_equity, invested, used_margin, pnl, "轮动平仓")
 
         strategy['balance'] += total_close_pnl
@@ -295,7 +288,6 @@ def execute_single_strategy(s_id, strategy, opener, market_map, top_10, current_
         strategy['balance'] = INITIAL_UNIT
         strategy['total_invested'] += INITIAL_UNIT
         current_equity = strategy['balance']
-        # 关键操作：REPLENISH -> 写入CSV
         log_to_csv("REPLENISH", s_id, "USDT", 0, 0, 0, 0, current_equity, strategy['total_invested'], 0, 0, "爆仓复活")
     
     # 4. 回本机制
@@ -304,7 +296,6 @@ def execute_single_strategy(s_id, strategy, opener, market_map, top_10, current_
         strategy['balance'] -= withdraw_amount
         strategy['total_invested'] -= withdraw_amount
         print(f"💰 策略 {s_id} 触发回本: 提取 {withdraw_amount}U")
-        # 关键操作：WITHDRAW -> 写入CSV
         log_to_csv("WITHDRAW", s_id, "USDT", 0, 0, 0, 0, strategy['balance'], strategy['total_invested'], 0, 0, "回本提取")
         current_equity = strategy['balance'] 
 
@@ -315,7 +306,6 @@ def execute_single_strategy(s_id, strategy, opener, market_map, top_10, current_
             trading_capital = INITIAL_UNIT
     
     if trading_capital < 1.0: 
-        # SKIP 不是关键操作，不写入CSV
         log_to_csv("SKIP", s_id, "ALL", 0, 0, 0, 0, current_equity, strategy['total_invested'], 0, 0, "资金不足")
     else:
         margin_per_coin = trading_capital / POSITIONS_COUNT
@@ -336,7 +326,6 @@ def execute_single_strategy(s_id, strategy, opener, market_map, top_10, current_
                 "leverage": LEVERAGE,
                 "entry_time": entry_ts
             })
-            # 关键操作：OPEN -> 写入CSV
             log_to_csv("OPEN", s_id, symbol, price, price, amount, 0, current_equity, strategy['total_invested'], total_used_margin, 0, "开空")
             
         strategy['positions'] = new_positions
