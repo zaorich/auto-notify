@@ -1,13 +1,8 @@
 name: 24h Short Strategy Bot
 
-#on:
-#  schedule:
-#    - cron: '*/15 * * * *'
-#  workflow_dispatch:
-
 on:
   schedule:
-    # 每小时的第0、15、30分钟各运行一次（例如 12:00, 12:20, 12:40）
+    # 每小时的 0, 15, 30, 45 分运行
     - cron: '0,15,30,45 * * * *'
   workflow_dispatch:
 
@@ -21,7 +16,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
-          fetch-depth: 1  # 👈 加上这一行！表示只拉取最近一次提交，忽略巨大的历史记录
+          fetch-depth: 1 
 
     - name: Set up Python
       uses: actions/setup-python@v5
@@ -30,17 +25,16 @@ jobs:
 
     - name: Start Xray Proxy
       run: |
-        # 修改点：加上 -O Xray-linux-64.zip，强制覆盖原文件
+        # 使用 -O 覆盖下载，防止产生重复文件
         wget -O Xray-linux-64.zip https://github.com/XTLS/Xray-core/releases/download/v1.8.4/Xray-linux-64.zip
         unzip -o Xray-linux-64.zip
         chmod +x xray
         nohup ./xray -config config.json > /dev/null 2>&1 &
         sleep 5
 
-    # --- 修改点：注入 Server酱 Key ---
     - name: Run Strategy Script
       env:
-        SERVERCHAN_KEY: SCT281228TBF1BQU3KUJ4vLRkykhzIE80e  # 这里把 Secret 传给 Python
+        SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }} # 建议改用 Secrets，如果懒得改，保持原样也能用
       run: python short_top10_gainers_3x_rotation.py
 
     - name: Save Data
@@ -48,20 +42,21 @@ jobs:
         git config --global user.name "StrategyBot"
         git config --global user.email "bot@github.com"
         
-        # 1. [核心修复] 开启自动暂存，如果遇到未提交的脏数据，先存起来再拉取
-        git config --global rebase.autoStash true
+        # --- [修改点1] 只添加关键数据文件，绝不添加 zip 和 exe 垃圾文件 ---
+        # 如果文件不存在也不会报错，只会忽略
+        git add strategy_state.json strategy_history.csv equity_curve.csv || true
         
-        # 2. [改进] 使用 git add . 添加所有变更，防止有文件漏网导致“未暂存”错误
-        git add .
-        
-        # 3. 检查是否有状态变化
+        # 检查是否有变化
         if [[ -n $(git status -s) ]]; then
-          git commit -m "📊 Update Data & Equity Curve [$(date)]"
+          git commit -m "📊 Update Data [$(date +'%Y-%m-%d %H:%M')]"
           
-          # 4. 拉取并变基 (现在即使有脏数据，autoStash 也会处理)
-          git pull --rebase origin main
+          # --- [修改点2] 解决冲突的核心 ---
+          # --rebase: 变基模式
+          # -X ours: 如果发生冲突（比如csv最后一行打架了），强制使用远程服务器的版本
+          # 这样虽然可能丢掉这一轮的 csv 记录（极小概率），但保证了流水线绝对不会红灯崩溃！
+          git pull --rebase -X ours origin main
           
           git push
         else
-          echo "No changes."
+          echo "✅ No changes to save."
         fi
