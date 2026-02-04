@@ -45,7 +45,8 @@ def analyze_strategies():
         return
 
     try:
-        # --- [核心修复点] ---
+        # --- [1. 读取历史记录] ---
+        # 强制指定最新的 14 个列名
         NEW_HEADERS = [
             "Time", "Strategy_ID", "Type", "Symbol", "Price", "15m_High", 
             "Amount", "Pos_PnL", "Strategy_Equity", "Total_Invested", 
@@ -54,14 +55,25 @@ def analyze_strategies():
         
         history_df = pd.read_csv(
             HISTORY_FILE, 
-            names=NEW_HEADERS,   # 1. 强制指定14个新列名
-            header=None,         # 2. 告诉pandas不要把第一行当表头读
-            skiprows=1,          # 3. 直接跳过第一行(旧表头)，防止列数不匹配
-            engine='python',     # 4. 使用Python引擎，允许列数不一致(自动补NaN)
-            on_bad_lines='skip'  # 5. 跳过极其离谱的坏行
+            names=NEW_HEADERS,   # 使用新列名
+            header=None,         # ⚠️ 关键：不读取文件自带的表头
+            skiprows=1,          # ⚠️ 关键：物理跳过第一行（旧表头）
+            engine='python',     # 使用宽容模式
+            on_bad_lines='skip'  # 跳过坏行
         )
         
-        equity_df = pd.read_csv(EQUITY_FILE)
+        # --- [2. 读取净值曲线] ---
+        # 强制指定最新的 27 个列名 (Time + 24个策略 + Total_Equity + Total_Invested)
+        EQUITY_HEADERS = ['Time'] + [f'S_{i}' for i in range(24)] + ['Total_Equity', 'Total_Invested']
+        
+        equity_df = pd.read_csv(
+            EQUITY_FILE,
+            names=EQUITY_HEADERS, # 使用新列名
+            header=None,          # 不读旧表头
+            skiprows=1,           # 跳过第一行
+            engine='python',
+            on_bad_lines='skip'
+        )
         
     except Exception as e:
         print(f"❌ 读取CSV失败: {e}")
@@ -85,20 +97,33 @@ def analyze_strategies():
         ]
         
         total_rounds = len(rounds)
-        if total_rounds == 0: continue
+        
+        if total_rounds > 0:
+            # 确保 Round_PnL 是数值型
+            pnl_series = pd.to_numeric(rounds['Round_PnL'], errors='coerce').fillna(0)
             
-        # 确保 Round_PnL 是数值型
-        pnl_series = pd.to_numeric(rounds['Round_PnL'], errors='coerce').fillna(0)
-        
-        win_rounds = len(pnl_series[pnl_series > 0])
-        loss_rounds = len(pnl_series[pnl_series <= 0])
-        win_rate = (win_rounds / total_rounds) * 100
-        total_pnl = pnl_series.sum()
-        
-        avg_win = pnl_series[pnl_series > 0].mean() if win_rounds > 0 else 0
-        avg_loss = abs(pnl_series[pnl_series <= 0].mean()) if loss_rounds > 0 else 0
-        pnl_ratio = (avg_win / avg_loss) if avg_loss > 0 else 99.9
-        
+            win_rounds = len(pnl_series[pnl_series > 0])
+            loss_rounds = len(pnl_series[pnl_series <= 0])
+            win_rate = (win_rounds / total_rounds) * 100
+            total_pnl = pnl_series.sum()
+            
+            avg_win = pnl_series[pnl_series > 0].mean() if win_rounds > 0 else 0
+            avg_loss = abs(pnl_series[pnl_series <= 0].mean()) if loss_rounds > 0 else 0
+            pnl_ratio = (avg_win / avg_loss) if avg_loss > 0 else 99.9
+        else:
+            # 如果没有结算数据，尝试用净值估算当前浮动盈亏
+            win_rate = 0
+            total_pnl = 0
+            pnl_ratio = 0
+            # 尝试从 equity_df 获取最新净值 - 1000
+            col_name = f"S_{i}"
+            if col_name in equity_df.columns and len(equity_df) > 0:
+                try:
+                    last_equity = pd.to_numeric(equity_df[col_name].iloc[-1], errors='coerce')
+                    total_pnl = last_equity - 1000
+                except:
+                    pass
+
         # 2. 风险数据 (Equity Curve)
         col_name = f"S_{i}"
         max_dd = 0.0
@@ -116,10 +141,7 @@ def analyze_strategies():
         })
 
     # --- 生成报告内容 ---
-    if not stats_list:
-        print("⚠️ 暂无有效结算数据 (ROUND_RES)，请等待策略至少完成一轮轮动。")
-        return
-
+    # 如果所有策略都还没跑完一轮，至少展示当前的浮动盈亏排名
     stats_list.sort(key=lambda x: x['pnl'], reverse=True)
     
     md_content = "| ID | 胜率 | 总盈 | 回撤 | 盈亏比 |\n| :--: | :--: | :--: | :--: | :--: |\n"
@@ -146,7 +168,7 @@ def analyze_strategies():
 {md_content}
 ---
 **指标说明**:
-1. **总盈**: 历史累计净利润。
+1. **总盈**: 历史累计净利润 (含浮动)。
 2. **回撤**: 越接近0越好。
 3. **盈亏比**: 平均赚的钱 / 平均亏的钱。
     """
