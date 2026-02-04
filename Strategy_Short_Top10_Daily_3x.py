@@ -129,7 +129,6 @@ def log_to_csv(record_type, strategy_id, symbol, price, high_price, amount, pos_
     # 关键事件白名单
     CRITICAL_EVENTS = ["OPEN", "CLOSE", "LIQUIDATION", "REPLENISH", "WITHDRAW"]
     
-    # [关键修复] 如果不是关键事件，直接返回，连控制台都不打印
     if record_type not in CRITICAL_EVENTS:
         return
 
@@ -216,7 +215,6 @@ def check_risk_management(opener, data, market_map):
         invested = strategy.get('total_invested', INITIAL_UNIT)
 
         # --- [极简输出逻辑] ---
-        # 1. 只有当策略有持仓时，才去构建详情字符串
         if details:
             coin_details_list = []
             for d in details:
@@ -227,17 +225,12 @@ def check_risk_management(opener, data, market_map):
             
             all_coins_str = " ".join(coin_details_list)
             pnl = equity - invested
-            # 输出一行汇总 (替代了原来的 log_to_csv("MONITOR"))
+            # 输出一行汇总
             print(f"   >> S{s_id:<2} 净:{equity:>5.0f} ({pnl:>+5.0f}) | {all_coins_str}")
         
-        # --- [注意] ---
-        # 此时绝对没有调用 log_to_csv("MONITOR"...)，所以不会刷屏
-        # -----------------
-
         if equity <= 0:
             print(f"💥 策略 {s_id} 触发全仓爆仓! 净值归零")
             liquidated_ids.append(s_id)
-            # 只有爆仓时，才调用 log_to_csv 记录详细强平信息
             for d in details:
                 log_to_csv("LIQUIDATION", s_id, d['symbol'], d['calc_price'], d['calc_price'], d['amount'], d['pnl'], 0, invested, "全仓强平")
             
@@ -385,7 +378,9 @@ def report_to_wechat(opener, data, market_map, rotated_ids, closed_only_ids, liq
     total_liquidations = 0
     max_profit = -999999
     
-    md_table = "| ID | 投入 | 净值 | 盈亏 | 爆 |\n| :--: | :--: | :--: | :--: | :--: |\n"
+    # --- [表格头更新] ---
+    # 增加 "押金" 和 "轮盈" (本轮浮动盈亏)
+    md_table = "| ID | 投入 | 押金 | 净值 | 总盈 | 轮盈 | 爆 |\n| :--: | :--: | :--: | :--: | :--: | :--: | :--: |\n"
     detail_text = ""
     current_ts = int(time.time())
     
@@ -398,15 +393,31 @@ def report_to_wechat(opener, data, market_map, rotated_ids, closed_only_ids, liq
         invested = strat.get('total_invested', INITIAL_UNIT)
         liq_count = strat.get('liquidation_count', 0)
         
+        # 计算净值和明细
         equity, details = calculate_strategy_equity(strat, market_map, opener, use_high_price=False)
+        
+        # --- [新增指标计算] ---
+        # 1. 押金 (Margin Used): 本轮开仓用了多少钱
+        used_margin = 0
+        if strat['positions']:
+            used_margin = sum([p.get('margin', 0) for p in strat['positions']])
+            
+        # 2. 轮盈 (Round PnL): 当前持有仓位的浮动盈亏
+        # 逻辑：当前净值 - 钱包余额(开仓前的余额)
+        # 注意：equity = balance + unrealized_pnl, 所以 round_pnl = unrealized_pnl
+        round_pnl = equity - strat['balance']
+        
+        # 3. 总盈 (Total PnL): 历史总盈亏
+        net_pnl = equity - invested
+        # ---------------------
         
         total_equity += equity
         total_invested_all += invested
         total_liquidations += liq_count
         
-        net_pnl = equity - invested
         if net_pnl > max_profit: max_profit = net_pnl
 
+        # 状态图标逻辑
         icon = "🔴" if net_pnl < 0 else "🟢"
         if equity == 0: icon = "💀" 
         elif s_id in rotated_ids: icon = "🔄"
@@ -415,8 +426,15 @@ def report_to_wechat(opener, data, market_map, rotated_ids, closed_only_ids, liq
         liq_str = str(liq_count) if liq_count > 0 else "-"
         inv_display = f"{invested:.0f}"
         
-        md_table += f"| {s_id} | {inv_display} | {equity:.0f} | {icon}{net_pnl:+.0f} | {liq_str} |\n"
+        # --- [表格行更新] ---
+        # 格式: ID | 投入 | 押金 | 净值 | 总盈 | 轮盈 | 爆
+        # 轮盈如果为0 (空仓)，显示 -
+        round_pnl_str = f"{round_pnl:+.0f}" if strat['positions'] else "-"
+        margin_str = f"{used_margin:.0f}" if strat['positions'] else "-"
+        
+        md_table += f"| {s_id} | {inv_display} | {margin_str} | {equity:.0f} | {icon}{net_pnl:+.0f} | {round_pnl_str} | {liq_str} |\n"
 
+        # 生成持仓详情
         pos_len = len(strat['positions'])
         should_show_detail = (pos_len > 0) or (s_id in all_action_ids) or (equity==0)
         
@@ -426,9 +444,7 @@ def report_to_wechat(opener, data, market_map, rotated_ids, closed_only_ids, liq
             elif s_id in closed_only_ids: prefix = "🛑"
             
             duration_str = "-"
-            used_margin = 0
             if pos_len > 0:
-                used_margin = sum([p.get('margin', 0) for p in strat['positions']])
                 first_pos = strat['positions'][0]
                 entry_time = first_pos.get('entry_time', 0)
                 if entry_time > 0:
@@ -440,7 +456,9 @@ def report_to_wechat(opener, data, market_map, rotated_ids, closed_only_ids, liq
             if s_id in closed_only_ids:
                 detail_text += f"\n🛑 **S{s_id}** (严重延迟 >1h): 仅平仓, 等待明日重启。\n"
             elif pos_len > 0:
-                detail_text += f"\n🔷 **{prefix}S{s_id}** (投:{invested:.0f}{liq_mark} 押:{used_margin:.0f} ⏱️{duration_str}):\n"
+                # --- [详情行更新] ---
+                # 增加本轮数据展示
+                detail_text += f"\n🔷 **{prefix}S{s_id}** (投:{invested:.0f}{liq_mark} 押:{used_margin:.0f} 轮:{round_pnl:+.0f} ⏱️{duration_str}):\n"
                 simple_items = []
                 for d in details:
                     warn_mark = "⚠️" if d.get('warn') else ""
