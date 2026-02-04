@@ -46,7 +46,6 @@ def analyze_strategies():
 
     try:
         # --- [核心修复点] ---
-        # 显式定义最新的 14 列表头，防止因旧数据列数不一致报错
         NEW_HEADERS = [
             "Time", "Strategy_ID", "Type", "Symbol", "Price", "15m_High", 
             "Amount", "Pos_PnL", "Strategy_Equity", "Total_Invested", 
@@ -56,23 +55,22 @@ def analyze_strategies():
         history_df = pd.read_csv(
             HISTORY_FILE, 
             names=NEW_HEADERS,   # 强制使用新表头
-            header=0,            # 忽略文件里的第一行(因为那是旧表头)
-            on_bad_lines='skip', # 跳过极少数无法解析的坏行
-            low_memory=False
+            header=0,            # 忽略文件里的第一行
+            engine='python',     # 👈 关键修改：使用 Python 引擎，允许列数不一致自动补空
+            on_bad_lines='skip'  # 跳过无法解析的行
         )
         
         equity_df = pd.read_csv(EQUITY_FILE)
         
     except Exception as e:
         print(f"❌ 读取CSV失败: {e}")
-        # 打印更多调试信息
         import traceback
         traceback.print_exc()
         return
 
     stats_list = []
     
-    # 确保 Strategy_ID 是数字类型，便于筛选
+    # 确保 Strategy_ID 是数字类型
     history_df['Strategy_ID'] = pd.to_numeric(history_df['Strategy_ID'], errors='coerce')
     
     # --- 数据分析循环 ---
@@ -80,7 +78,6 @@ def analyze_strategies():
         s_id = str(i)
         
         # 1. 基础数据 (History)
-        # 筛选出该策略所有的结算记录 (ROUND_RES)
         rounds = history_df[
             (history_df['Strategy_ID'] == i) & 
             (history_df['Type'] == 'ROUND_RES')
@@ -122,10 +119,8 @@ def analyze_strategies():
         print("⚠️ 暂无有效结算数据 (ROUND_RES)，请等待策略至少完成一轮轮动。")
         return
 
-    # 按总收益降序排序
     stats_list.sort(key=lambda x: x['pnl'], reverse=True)
     
-    # 构建 Markdown 表格
     md_content = "| ID | 胜率 | 总盈 | 回撤 | 盈亏比 |\n| :--: | :--: | :--: | :--: | :--: |\n"
     
     top_performer = ""
