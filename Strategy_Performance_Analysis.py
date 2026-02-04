@@ -17,7 +17,7 @@ def send_wechat_msg(title, content):
         print(f"⚠️ 未配置 SERVERCHAN_KEY，只打印不发送。\n标题: {title}\n内容:\n{content}")
         return
 
-    # Server酱特定优化：两个换行符才能在微信中正确换行
+    # 微信显示优化：确保换行正确
     content = content.replace('\n', '\n\n')
     
     url = f"https://sctapi.ftqq.com/{SERVERCHAN_KEY}.send"
@@ -34,6 +34,7 @@ def robust_read_csv(filename, col_names):
         print(f"❌ 文件不存在: {filename}")
         return pd.DataFrame()
     try:
+        # 尝试读取
         df = pd.read_csv(
             filename,
             names=col_names,
@@ -56,32 +57,98 @@ def calculate_max_drawdown(equity_series):
     return drawdown.min() * 100
 
 def get_open_time_str(s_id_int):
-    """根据策略ID计算东八区开仓时间"""
     hour = (8 + s_id_int) % 24
     return f"{hour:02d}点"
 
 def analyze_market_mechanics(history_df):
-    """分析：昨日复盘 + 最佳做空时机"""
+    """
+    包含两个部分：
+    1. 昨日新币详细复盘 (具体的币)
+    2. 历史最佳做空时机 (统计规律)
+    """
+    # 筛选开仓数据
     df = history_df[history_df['Type'] == 'OPEN'].copy()
-    if df.empty: return "", ""
+    if df.empty: return "无数据", "无数据"
 
     df['Time'] = pd.to_datetime(df['Time'])
     df['Price'] = pd.to_numeric(df['Price'], errors='coerce')
     df = df.dropna(subset=['Price'])
+    
+    # 转换为东八区时间方便阅读
+    df['Time_CN'] = df['Time'] + timedelta(hours=8)
 
-    # 1. 昨日复盘
+    # --- 分析 1: 昨日新币详细复盘 ---
     now = datetime.now()
     yesterday = now - timedelta(hours=24)
-    recent_df = df[df['Time'] > yesterday].copy()
+    
+    # 找到最近24小时内出现过的币种
+    recent_records = df[df['Time'] > yesterday].copy()
     
     daily_review_md = ""
-    if not recent_df.empty:
-        count = len(recent_df['Symbol'].unique())
-        daily_review_md = f"**🔥 昨日复盘**: 新上榜 {count} 个币种"
+    
+    if not recent_records.empty:
+        # 按币种分组，找到每个币在过去24h的第一次出现
+        # 注意：这里我们只关心"新"上榜，或者在该时间段内首次出现的
+        unique_coins = recent_records['Symbol'].unique()
+        
+        coin_stats = []
+        for symbol in unique_coins:
+            # 找到该币的所有记录（包括历史记录，以便计算涨跌）
+            coin_hist = df[df['Symbol'] == symbol].sort_values('Time')
+            
+            # 找到它在过去24h的第一次出现时间 T0
+            entries_in_24h = coin_hist[coin_hist['Time'] > yesterday]
+            if entries_in_24h.empty: continue
+            
+            t0 = entries_in_24h.iloc[0]
+            t0_price = t0['Price']
+            t0_time = t0['Time']
+            t0_time_cn_str = t0['Time_CN'].strftime("%H:%M")
+            
+            # 在全量历史中找 T0 之后的数据，计算最高涨幅
+            subsequent = coin_hist[coin_hist['Time'] >= t0_time]
+            
+            max_price = subsequent['Price'].max()
+            curr_price = subsequent.iloc[-1]['Price']
+            
+            # 计算指标
+            max_pump_pct = ((max_price - t0_price) / t0_price) * 100
+            curr_change_pct = ((curr_price - t0_price) / t0_price) * 100
+            
+            # 找到最高点发生的时间延迟
+            max_price_row = subsequent[subsequent['Price'] == max_price].iloc[0]
+            delay_hours = (max_price_row['Time'] - t0_time).total_seconds() / 3600
+            
+            coin_stats.append({
+                'Symbol': symbol.replace('USDT', ''),
+                'Time': t0_time_cn_str,
+                'MaxPump': max_pump_pct,
+                'MaxDelay': delay_hours,
+                'Curr': curr_change_pct
+            })
+            
+        # 生成复盘表格
+        if coin_stats:
+            # 按最高涨幅排序，看看谁是妖币
+            coin_stats.sort(key=lambda x: x['MaxPump'], reverse=True)
+            
+            daily_review_md = "| 币种(上榜) | 最高涨幅 | 现价 |\n| :-- | :--: | :--: |\n"
+            for c in coin_stats:
+                # 格式化
+                pump_str = f"{c['MaxPump']:+.1f}%(+{int(c['MaxDelay'])}h)"
+                curr_str = f"{c['Curr']:+.1f}%"
+                
+                # 高亮妖币
+                if c['MaxPump'] > 10: pump_str = f"🔥{pump_str}"
+                
+                daily_review_md += f"| {c['Symbol']}({c['Time']}) | {pump_str} | {curr_str} |\n"
+        else:
+            daily_review_md = "无新币数据"
     else:
-        daily_review_md = "**🔥 昨日复盘**: 市场冷清，无新币上榜"
+        daily_review_md = "过去24h无新币上榜"
 
-    # 2. 最佳做空时机分析 (Time Decay Alpha)
+
+    # --- 分析 2: 历史最佳做空时机 (统计规律) ---
     df['Date'] = df['Time'].dt.date
     grouped = df.groupby(['Symbol', 'Date'])
     
@@ -102,26 +169,24 @@ def analyze_market_mechanics(history_df):
     if results:
         res_df = pd.DataFrame(results)
         summary = res_df.groupby('delay')['change'].agg(['mean', 'count']).reset_index()
-        summary = summary[summary['count'] >= 2] # 至少2个样本才显示
+        summary = summary[summary['count'] >= 5] # 样本过滤
         
-        # 手机端优化：极简表头
-        best_time_md = "| 延时 | 均涨幅 | 状态 |\n| :--: | :--: | :--: |\n"
+        best_time_md = "| 延迟 | 均涨幅 | 建议 |\n| :--: | :--: | :--: |\n"
         
         for _, row in summary.iterrows():
             hour = int(row['delay'])
             avg_chg = row['mean']
             
-            # 状态判定
-            status = "👀"
-            if avg_chg > 10.0: status = "⛔️高危"
-            elif avg_chg > 5.0: status = "🚀暴涨"
-            elif avg_chg > 0: status = "⏳微涨"
-            elif avg_chg < -1.0: status = "✅转跌"
-            elif avg_chg <= 0: status = "📉微跌"
+            advice = "👀"
+            if avg_chg > 8.0: advice = "⛔️快跑"
+            elif avg_chg > 4.0: advice = "🔥暴涨"
+            elif avg_chg > 0: advice = "⏳微涨"
+            elif avg_chg < -1.0: advice = "✅赢麻"
+            elif avg_chg <= 0: advice = "📉微跌"
             
-            best_time_md += f"| +{hour}h | {avg_chg:+.1f}% | {status} |\n"
+            best_time_md += f"| +{hour}h | {avg_chg:+.1f}% | {advice} |\n"
     else:
-        best_time_md = "数据积累中..."
+        best_time_md = "数据不足..."
 
     return daily_review_md, best_time_md
 
@@ -144,11 +209,10 @@ def analyze_strategies():
     history_df['Round_PnL'] = pd.to_numeric(history_df['Round_PnL'], errors='coerce').fillna(0)
     history_df['Pos_PnL'] = pd.to_numeric(history_df['Pos_PnL'], errors='coerce').fillna(0)
 
-    # --- 1. 市场分析 ---
+    # 1. 市场分析模块
     daily_review_str, best_time_str = analyze_market_mechanics(history_df)
 
-    # --- 2. 策略排行 ---
-    # 备用计算：防止 ROUND_RES 缺失
+    # 2. 策略排行模块
     close_events = history_df[history_df['Type'] == 'CLOSE'].copy()
     rounds_fallback = pd.DataFrame()
     if not close_events.empty:
@@ -158,10 +222,8 @@ def analyze_strategies():
     for i in range(24):
         s_id = str(i)
         
-        # 优先取结算数据
         rounds_res = history_df[(history_df['Strategy_ID'] == i) & (history_df['Type'] == 'ROUND_RES')]
         
-        # 默认值
         pnl = 0; wins = 0; total = 0; max_loss = 0
         
         if len(rounds_res) > 0:
@@ -177,66 +239,60 @@ def analyze_strategies():
                 wins = len(strat_r[strat_r['Pos_PnL'] > 0])
                 max_loss = strat_r['Pos_PnL'].min()
         else:
-            # 终极备用：净值差
             col = f"S_{i}"
             if col in equity_df.columns:
                 series = pd.to_numeric(equity_df[col], errors='coerce').dropna()
                 if len(series) > 0: pnl = series.iloc[-1] - 1000
 
-        # 修正：max_loss 应当是负数，如果全是盈利则为0
         if max_loss > 0: max_loss = 0
         
-        # 胜率计算
         win_rate = (wins / total * 100) if total > 0 else 0
         win_str = f"{int(win_rate)}%({wins}/{total})"
         
-        # 回撤计算
         max_dd = 0.0
         col = f"S_{i}"
         if col in equity_df.columns: max_dd = calculate_max_drawdown(equity_df[col])
         
-        # 格式化 ID 和 时间 (合并以节省表格列)
-        open_time = get_open_time_str(i)
-        id_display = f"S{s_id}({open_time})"
-        
         stats_list.append({
             'id': s_id,
-            'id_disp': id_display,
-            'pnl': pnl,
+            'open_time': get_open_time_str(i),
             'win_str': win_str,
+            'pnl': pnl,
             'dd': max_dd,
             'max_loss': max_loss
         })
 
     stats_list.sort(key=lambda x: x['pnl'], reverse=True)
     
-    # 生成全量表格 (手机端优化版)
-    # 列: 策略(时间) | 胜率 | 总盈 | 回撤 | 单亏
+    # 3. 生成排行榜表格
     rank_table = "| 策略(时间) | 胜率 | 总盈 | 回撤 | 单亏 |\n| :-- | :--: | :--: | :--: | :--: |\n"
     
     top_performer = ""
     for idx, s in enumerate(stats_list):
         if idx == 0: top_performer = f"S{s['id']}"
         
-        # 数值格式化
         pnl_fmt = f"{s['pnl']:.0f}"
         dd_fmt = f"{s['dd']:.1f}%"
         loss_fmt = f"{s['max_loss']:.0f}"
         
-        rank_table += f"| {s['id_disp']} | {s['win_str']} | {pnl_fmt} | {dd_fmt} | {loss_fmt} |\n"
+        rank_table += f"| S{s['id']}({s['open_time']}) | {s['win_str']} | {pnl_fmt} | {dd_fmt} | {loss_fmt} |\n"
 
-    # --- 3. 发送报告 ---
+    # 4. 发送最终报告
     current_time = datetime.now().strftime("%m-%d %H:%M")
     
     title = f"📈 策略日报: {top_performer} 领跑"
     desp = f"""
 **{current_time} (UTC+8)**
+
+### 🔥 昨日新币复盘 (详细)
+*记录过去24h上榜币种的表现*
 {daily_review_str}
 
-### ⏳ 最佳做空时机 (Alpha)
+### ⏳ 历史最佳做空时机
+*基于所有历史数据统计*
 {best_time_str}
 
-### 🏆 全策略完整排行
+### 🏆 全策略排行榜
 {rank_table}
     """
     
