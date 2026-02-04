@@ -942,10 +942,91 @@
     "liquidation_count": 0
   },
   "13": {
-    "balance": 0,
-    "positions": [],
-    "last_trade_date": "2026-02-03",
-    "total_invested": 1000.0,
+    "balance": 1000.0,
+    "positions": [
+      {
+        "symbol": "ARCUSDT",
+        "entry_price": 0.08338,
+        "margin": 100.0,
+        "amount": 3597.9851283281364,
+        "leverage": 3.0,
+        "entry_time": 1770212304
+      },
+      {
+        "symbol": "RIVERUSDT",
+        "entry_price": 16.974,
+        "margin": 100.0,
+        "amount": 17.674089784376104,
+        "leverage": 3.0,
+        "entry_time": 1770212304
+      },
+      {
+        "symbol": "SYNUSDT",
+        "entry_price": 0.08657,
+        "margin": 100.0,
+        "amount": 3465.403719533326,
+        "leverage": 3.0,
+        "entry_time": 1770212304
+      },
+      {
+        "symbol": "ZKPUSDT",
+        "entry_price": 0.09529,
+        "margin": 100.0,
+        "amount": 3148.28418511911,
+        "leverage": 3.0,
+        "entry_time": 1770212304
+      },
+      {
+        "symbol": "OGUSDT",
+        "entry_price": 3.959,
+        "margin": 100.0,
+        "amount": 75.77671129072998,
+        "leverage": 3.0,
+        "entry_time": 1770212304
+      },
+      {
+        "symbol": "GUSDT",
+        "entry_price": 0.004382,
+        "margin": 100.0,
+        "amount": 68461.88954815154,
+        "leverage": 3.0,
+        "entry_time": 1770212304
+      },
+      {
+        "symbol": "COLLECTUSDT",
+        "entry_price": 0.03314,
+        "margin": 100.0,
+        "amount": 9052.504526252262,
+        "leverage": 3.0,
+        "entry_time": 1770212304
+      },
+      {
+        "symbol": "COAIUSDT",
+        "entry_price": 0.3028,
+        "margin": 100.0,
+        "amount": 990.7529722589168,
+        "leverage": 3.0,
+        "entry_time": 1770212304
+      },
+      {
+        "symbol": "QUSDT",
+        "entry_price": 0.019485,
+        "margin": 100.0,
+        "amount": 15396.458814472671,
+        "leverage": 3.0,
+        "entry_time": 1770212304
+      },
+      {
+        "symbol": "ALCHUSDT",
+        "entry_price": 0.09428,
+        "margin": 100.0,
+        "amount": 3182.0110309715737,
+        "leverage": 3.0,
+        "entry_time": 1770212304
+      }
+    ],
+    "last_trade_date": "2026-02-04",
+    "total_invested": 2000.0,
     "liquidation_count": 0
   },
   "14": {
