@@ -17,7 +17,10 @@ def send_wechat_msg(title, content):
         print(f"⚠️ 未配置 SERVERCHAN_KEY，只打印不发送。\n标题: {title}\n内容:\n{content}")
         return
 
-    # Server酱支持直接渲染 HTML，不需要特殊处理换行
+    # 微信显示优化：Markdown 换行需要两个换行符
+    # 这一步非常关键，否则表格会挤在一起
+    content = content.replace('\n', '\n\n')
+    
     url = f"https://sctapi.ftqq.com/{SERVERCHAN_KEY}.send"
     params = {'title': title, 'desp': content}
     try:
@@ -30,7 +33,15 @@ def send_wechat_msg(title, content):
 def robust_read_csv(filename, col_names):
     if not os.path.exists(filename): return pd.DataFrame()
     try:
-        df = pd.read_csv(filename, names=col_names, header=None, skiprows=1, engine='python', on_bad_lines='skip')
+        # 使用 python 引擎 + 跳过坏行，最大限度防止报错
+        df = pd.read_csv(
+            filename, 
+            names=col_names, 
+            header=None, 
+            skiprows=1, 
+            engine='python', 
+            on_bad_lines='skip'
+        )
         return df
     except: return pd.DataFrame()
 
@@ -44,69 +55,30 @@ def calculate_max_drawdown(equity_series):
 
 def get_open_time_str(s_id_int):
     hour = (8 + s_id_int) % 24
-    return f"{hour:02d}:00"
-
-def df_to_html_table(df, title=""):
-    """将 DataFrame 转换为漂亮的 HTML 表格"""
-    if df.empty: return f"<p>{title}: 无数据</p>"
-    
-    # CSS 样式：紧凑、居中、带边框、表头灰色背景
-    style = """
-    <style>
-    table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 15px; }
-    th, td { border: 1px solid #ddd; padding: 4px; text-align: center; }
-    th { background-color: #f2f2f2; font-weight: bold; }
-    .pos { color: red; }
-    .neg { color: green; }
-    </style>
-    """
-    
-    html = f"<h4>{title}</h4>" + style + "<table><thead><tr>"
-    for col in df.columns:
-        html += f"<th>{col}</th>"
-    html += "</tr></thead><tbody>"
-    
-    for _, row in df.iterrows():
-        html += "<tr>"
-        for item in row:
-            # 简单的颜色处理
-            val_str = str(item)
-            color_class = ""
-            if "%" in val_str:
-                if "+" in val_str or (val_str.replace('%','').replace('.','').isdigit() and float(val_str.replace('%','')) > 0):
-                    color_class = 'class="pos"' # 涨显示红色(或根据习惯)
-                elif "-" in val_str:
-                    color_class = 'class="neg"' # 跌显示绿色
-            
-            html += f"<td {color_class}>{val_str}</td>"
-        html += "</tr>"
-    html += "</tbody></table>"
-    return html
+    return f"{hour:02d}点"
 
 def analyze_market_mechanics(history_df):
-    """分析市场：昨日复盘明细 + 统计规律"""
+    """分析市场：昨日复盘 + 统计规律"""
     df = history_df[history_df['Type'] == 'OPEN'].copy()
-    if df.empty: return "", ""
+    if df.empty: return "无数据", "无数据"
 
     df['Time'] = pd.to_datetime(df['Time'])
     df['Price'] = pd.to_numeric(df['Price'], errors='coerce')
     df = df.dropna(subset=['Price'])
     df['Time_CN'] = df['Time'] + timedelta(hours=8)
 
-    # --- 1. 昨日新币复盘 (详细表格) ---
+    # --- 1. 昨日新币复盘 (Markdown 表格) ---
     now = datetime.now()
     yesterday = now - timedelta(hours=24)
     recent_df = df[df['Time'] > yesterday].copy()
     
-    review_html = ""
+    review_md = ""
     coin_data = []
     
     if not recent_df.empty:
         unique_coins = recent_df['Symbol'].unique()
         for symbol in unique_coins:
-            # 获取该币种所有数据
             coin_hist = df[df['Symbol'] == symbol].sort_values('Time')
-            # 找到过去24h的第一次上榜
             entries_24h = coin_hist[coin_hist['Time'] > yesterday]
             if entries_24h.empty: continue
             
@@ -114,7 +86,6 @@ def analyze_market_mechanics(history_df):
             t0_p = t0['Price']
             t0_t = t0['Time']
             
-            # 找后续数据
             subsequent = coin_hist[coin_hist['Time'] >= t0_t]
             if subsequent.empty: continue
             
@@ -124,30 +95,32 @@ def analyze_market_mechanics(history_df):
             max_pump = (max_p - t0_p) / t0_p * 100
             curr_chg = (curr_p - t0_p) / t0_p * 100
             
-            # 找到最高点延迟
             max_row = subsequent[subsequent['Price'] == max_p].iloc[0]
             delay = (max_row['Time'] - t0_t).total_seconds() / 3600
             
             coin_data.append({
-                "币种": symbol.replace('USDT',''),
-                "上榜": t0['Time_CN'].strftime("%H:%M"),
-                "最高涨": f"{max_pump:+.1f}%",
-                "耗时": f"{int(delay)}h",
-                "现价": f"{curr_chg:+.1f}%"
+                "coin": symbol.replace('USDT',''),
+                "time": t0['Time_CN'].strftime("%H:%M"),
+                "pump": max_pump,
+                "delay": int(delay),
+                "curr": curr_chg
             })
             
         if coin_data:
-            review_df = pd.DataFrame(coin_data)
-            # 按最高涨幅降序
-            review_df['sort_val'] = review_df['最高涨'].apply(lambda x: float(x.strip('%')))
-            review_df = review_df.sort_values('sort_val', ascending=False).drop(columns=['sort_val'])
-            review_html = df_to_html_table(review_df, "🔥 昨日新币复盘 (详细)")
+            # 按最高涨幅排序
+            coin_data.sort(key=lambda x: x['pump'], reverse=True)
+            review_md = "| 币种 | 上榜 | 最高涨 | 现价 |\n| :-- | :--: | :--: | :--: |\n"
+            for c in coin_data:
+                pump_str = f"{c['pump']:+.1f}%(+{c['delay']}h)"
+                if c['pump'] > 10: pump_str = f"🔥{pump_str}"
+                curr_str = f"{c['curr']:+.1f}%"
+                review_md += f"| {c['coin']} | {c['time']} | {pump_str} | {curr_str} |\n"
         else:
-            review_html = "<p>无新币数据</p>"
+            review_md = "无新币数据"
     else:
-        review_html = "<p>过去24h无新币上榜</p>"
+        review_md = "过去24h无新币上榜"
 
-    # --- 2. 历史最佳做空时机 (统计) ---
+    # --- 2. 历史最佳做空时机 (Markdown 表格) ---
     df['Date'] = df['Time'].dt.date
     grouped = df.groupby(['Symbol', 'Date'])
     
@@ -164,13 +137,13 @@ def analyze_market_mechanics(history_df):
             chg = (curr['Price'] - t0_p) / t0_p * 100
             results.append({'delay': int(round(diff)), 'chg': chg})
             
-    best_time_html = ""
+    best_time_md = ""
     if results:
         res_df = pd.DataFrame(results)
         summary = res_df.groupby('delay')['chg'].agg(['mean', 'count']).reset_index()
-        summary = summary[summary['count'] >= 3] # 过滤小样本
+        summary = summary[summary['count'] >= 3]
         
-        table_data = []
+        best_time_md = "| 延迟 | 均涨跌 | 建议 |\n| :--: | :--: | :--: |\n"
         for _, row in summary.iterrows():
             h = int(row['delay'])
             avg = row['mean']
@@ -181,28 +154,22 @@ def analyze_market_mechanics(history_df):
             elif avg > 0: s = "⏳微涨"
             elif avg < -1: s = "✅转跌"
             
-            table_data.append({
-                "延迟": f"+{h}h",
-                "均涨跌": f"{avg:+.1f}%",
-                "建议": s
-            })
-        
-        bt_df = pd.DataFrame(table_data)
-        best_time_html = df_to_html_table(bt_df, "⏳ 历史做空规律 (Alpha)")
+            best_time_md += f"| +{h}h | {avg:+.1f}% | {s} |\n"
     else:
-        best_time_html = "<p>数据积累中...</p>"
+        best_time_md = "数据积累中..."
 
-    return review_html, best_time_html
+    return review_md, best_time_md
 
 def analyze_strategies():
-    print("📊 生成 HTML 报告...")
+    print("📊 生成 Markdown 报告...")
 
     HISTORY_COLS = [
         "Time", "Strategy_ID", "Type", "Symbol", "Price", "15m_High", 
         "Amount", "Pos_PnL", "Strategy_Equity", "Total_Invested", 
         "Used_Margin", "Round_PnL", "24h_Change", "Note"
     ]
-    EQUITY_COLS = ['Time'] + [f'S_{i}' for i in range(24)] + ['Total_Equity', 'Total_Invested']
+    # 增加列数定义以防止读取报错
+    EQUITY_COLS = ['Time'] + [f'S_{i}' for i in range(24)] + ['Total_Equity', 'Total_Invested', 'Extra']
 
     history_df = robust_read_csv(HISTORY_FILE, HISTORY_COLS)
     equity_df = robust_read_csv(EQUITY_FILE, EQUITY_COLS)
@@ -212,13 +179,12 @@ def analyze_strategies():
     history_df['Strategy_ID'] = pd.to_numeric(history_df['Strategy_ID'], errors='coerce')
     history_df['Round_PnL'] = pd.to_numeric(history_df['Round_PnL'], errors='coerce').fillna(0)
 
-    # 1. 市场分析 (HTML)
-    review_html, best_time_html = analyze_market_mechanics(history_df)
+    # 1. 市场分析
+    review_md, best_time_md = analyze_market_mechanics(history_df)
 
     # 2. 策略排行
     stats_list = []
     
-    # 备用计算
     close_events = history_df[history_df['Type'] == 'CLOSE'].copy()
     history_df['Pos_PnL'] = pd.to_numeric(history_df['Pos_PnL'], errors='coerce').fillna(0)
     rounds_fallback = pd.DataFrame()
@@ -256,34 +222,43 @@ def analyze_strategies():
         col = f"S_{i}"
         if col in equity_df.columns: max_dd = calculate_max_drawdown(equity_df[col])
         
+        # 简化ID显示 S22(06)
+        id_str = f"S{s_id}({get_open_time_str(i).replace('点','')})"
+        
         stats_list.append({
-            "策略": f"S{s_id}",
-            "开仓": get_open_time_str(i),
-            "胜率": win_str,
-            "总盈": f"{pnl:.0f}",
-            "回撤": f"{max_dd:.1f}%",
-            "单亏": f"{max_loss:.0f}"
+            "id": id_str,
+            "pnl": pnl,
+            "win": win_str,
+            "dd": max_dd,
+            "loss": max_loss
         })
 
-    stats_list.sort(key=lambda x: float(x['总盈']), reverse=True)
+    stats_list.sort(key=lambda x: x['pnl'], reverse=True)
     
-    # 生成 HTML 表格
-    rank_df = pd.DataFrame(stats_list)
-    rank_html = df_to_html_table(rank_df, "🏆 策略排行榜 (全量)")
+    # 3. 生成排行榜 Markdown 表格
+    rank_md = "| ID(时) | 胜率 | 总盈 | 回撤 | 单亏 |\n| :-- | :--: | :--: | :--: | :--: |\n"
+    for s in stats_list:
+        pnl_s = f"{s['pnl']:.0f}"
+        dd_s = f"{s['dd']:.1f}%"
+        loss_s = f"{s['loss']:.0f}"
+        rank_md += f"| {s['id']} | {s['win']} | {pnl_s} | {dd_s} | {loss_s} |\n"
 
-    # 3. 组装最终 HTML 消息
+    # 4. 组装最终消息
     current_time = datetime.now().strftime("%m-%d %H:%M")
-    top_performer = stats_list[0]['策略'] if stats_list else "None"
+    top_performer = stats_list[0]['id'] if stats_list else "None"
     
     title = f"📈 策略日报: {top_performer} 领跑"
-    
-    # 将所有 HTML 片段拼接
     content = f"""
-    <h3>📊 策略分析日报 {current_time}</h3>
-    <hr>
-    {review_html}
-    {best_time_html}
-    {rank_html}
+**{current_time} (UTC+8)**
+
+### 🔥 昨日新币复盘
+{review_md}
+
+### ⏳ 历史做空规律
+{best_time_md}
+
+### 🏆 策略排行榜
+{rank_md}
     """
     
     send_wechat_msg(title, content)
