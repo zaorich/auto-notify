@@ -54,10 +54,11 @@ def analyze_strategies():
         
         history_df = pd.read_csv(
             HISTORY_FILE, 
-            names=NEW_HEADERS,   # 强制使用新表头
-            header=0,            # 忽略文件里的第一行
-            engine='python',     # 👈 关键修改：使用 Python 引擎，允许列数不一致自动补空
-            on_bad_lines='skip'  # 跳过无法解析的行
+            names=NEW_HEADERS,   # 1. 强制指定14个新列名
+            header=None,         # 2. 告诉pandas不要把第一行当表头读
+            skiprows=1,          # 3. 直接跳过第一行(旧表头)，防止列数不匹配
+            engine='python',     # 4. 使用Python引擎，允许列数不一致(自动补NaN)
+            on_bad_lines='skip'  # 5. 跳过极其离谱的坏行
         )
         
         equity_df = pd.read_csv(EQUITY_FILE)
