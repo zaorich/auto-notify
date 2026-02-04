@@ -766,80 +766,90 @@
     "liquidation_count": 0
   },
   "11": {
-    "balance": 1679.8852936451353,
+    "balance": 1847.4048640118142,
     "positions": [
       {
-        "symbol": "BULLAUSDT",
-        "entry_price": 0.03134,
-        "margin": 167.98852936451354,
-        "amount": 16080.586729213166,
-        "leverage": 3.0
-      },
-      {
-        "symbol": "ZILUSDT",
-        "entry_price": 0.00704,
-        "margin": 167.98852936451354,
-        "amount": 71586.0210360143,
-        "leverage": 3.0
-      },
-      {
-        "symbol": "BIRBUSDT",
-        "entry_price": 0.3279,
-        "margin": 167.98852936451354,
-        "amount": 1536.9490335271137,
-        "leverage": 3.0
-      },
-      {
-        "symbol": "C98USDT",
-        "entry_price": 0.0271,
-        "margin": 167.98852936451354,
-        "amount": 18596.516165813307,
-        "leverage": 3.0
-      },
-      {
-        "symbol": "CHESSUSDT",
-        "entry_price": 0.02756,
-        "margin": 167.98852936451354,
-        "amount": 18286.124386558076,
-        "leverage": 3.0
-      },
-      {
         "symbol": "ARCUSDT",
-        "entry_price": 0.05649,
-        "margin": 167.98852936451354,
-        "amount": 8921.323917393178,
-        "leverage": 3.0
+        "entry_price": 0.08374,
+        "margin": 184.7404864011814,
+        "amount": 6618.359914061909,
+        "leverage": 3.0,
+        "entry_time": 1770203006
       },
       {
-        "symbol": "HANAUSDT",
-        "entry_price": 0.03699,
-        "margin": 167.98852936451354,
-        "amount": 13624.37383329388,
-        "leverage": 3.0
+        "symbol": "ZKPUSDT",
+        "entry_price": 0.09571,
+        "margin": 184.7404864011814,
+        "amount": 5790.632736428212,
+        "leverage": 3.0,
+        "entry_time": 1770203006
       },
       {
-        "symbol": "GPSUSDT",
-        "entry_price": 0.008111,
-        "margin": 167.98852936451354,
-        "amount": 62133.594882695186,
-        "leverage": 3.0
+        "symbol": "ALCHUSDT",
+        "entry_price": 0.10006,
+        "margin": 184.7404864011814,
+        "amount": 5538.891257281074,
+        "leverage": 3.0,
+        "entry_time": 1770203006
       },
       {
-        "symbol": "STXUSDT",
-        "entry_price": 0.309,
-        "margin": 167.98852936451354,
-        "amount": 1630.9565957719763,
-        "leverage": 3.0
+        "symbol": "GUSDT",
+        "entry_price": 0.004452,
+        "margin": 184.7404864011814,
+        "amount": 124488.19838354542,
+        "leverage": 3.0,
+        "entry_time": 1770203006
       },
       {
-        "symbol": "UAIUSDT",
-        "entry_price": 0.2381,
-        "margin": 167.98852936451354,
-        "amount": 2116.6131377301163,
-        "leverage": 3.0
+        "symbol": "OGUSDT",
+        "entry_price": 3.988,
+        "margin": 184.7404864011814,
+        "amount": 138.97228164582353,
+        "leverage": 3.0,
+        "entry_time": 1770203006
+      },
+      {
+        "symbol": "GWEIUSDT",
+        "entry_price": 0.029416,
+        "margin": 184.7404864011814,
+        "amount": 18840.816535339414,
+        "leverage": 3.0,
+        "entry_time": 1770203006
+      },
+      {
+        "symbol": "COAIUSDT",
+        "entry_price": 0.3025,
+        "margin": 184.7404864011814,
+        "amount": 1832.137055218328,
+        "leverage": 3.0,
+        "entry_time": 1770203006
+      },
+      {
+        "symbol": "ZORAUSDT",
+        "entry_price": 0.0272,
+        "margin": 184.7404864011814,
+        "amount": 20375.788941306775,
+        "leverage": 3.0,
+        "entry_time": 1770203006
+      },
+      {
+        "symbol": "ENSOUSDT",
+        "entry_price": 1.2483,
+        "margin": 184.7404864011814,
+        "amount": 443.9809814976722,
+        "leverage": 3.0,
+        "entry_time": 1770203006
+      },
+      {
+        "symbol": "\u6211\u8e0f\u9a6c\u6765\u4e86USDT",
+        "entry_price": 0.037366,
+        "margin": 184.7404864011814,
+        "amount": 14832.239447721035,
+        "leverage": 3.0,
+        "entry_time": 1770203006
       }
     ],
-    "last_trade_date": "2026-02-03",
+    "last_trade_date": "2026-02-04",
     "total_invested": 1000.0,
     "liquidation_count": 0
   },
