@@ -4,7 +4,7 @@ import json
 import time
 import os
 import csv
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # ==========================================
 #               策略核心配置
@@ -15,21 +15,15 @@ HISTORY_FILE = "strategy_history.csv"
 EQUITY_FILE = "equity_curve.csv"
 
 # --- [新功能开关] ---
-# 1. 复利滚雪球开关
-# True = 开启复利 (有多少钱开多少仓)
-# False = 关闭复利 (大于1000U时只用1000U开仓，多余的留作缓冲；小于1000U时全仓)
-ENABLE_COMPOUNDING = True 
-
-# 2. 回本/提现机制开关
-# True = 开启回本 (当余额 >= 2000U 时，提取 1000U 出来，减少累计投入)
-# False = 关闭回本 (钱一直留在策略里)
-ENABLE_ROI_PAYBACK = True
+ENABLE_COMPOUNDING = True  # 复利开关
+ENABLE_ROI_PAYBACK = True  # 回本提取开关
 
 # --- [资金参数] ---
 INITIAL_UNIT = 1000.0     # 标准开仓/复活金额
 POSITIONS_COUNT = 10      # 持仓数量
 LEVERAGE = 3.0            # 杠杆倍数
-MIN_ALIVE_BALANCE = 10.0  # “存活”阈值：低于10U视为无法开单，强制复活
+MIN_ALIVE_BALANCE = 10.0  # “存活”阈值
+MAX_DELAY_SECONDS = 3600  # 最大延迟容忍时间(秒)
 
 HEADERS = {'User-Agent': 'Mozilla/5.0'}
 SERVERCHAN_KEY = os.environ.get("SERVERCHAN_KEY")
@@ -39,7 +33,6 @@ SERVERCHAN_KEY = os.environ.get("SERVERCHAN_KEY")
 # ==========================================
 
 def get_proxy_opener():
-    """获取带有代理配置的请求Opener"""
     proxy_handler = urllib.request.ProxyHandler({
         'http': f'http://{PROXY_ADDR}',
         'https': f'http://{PROXY_ADDR}'
@@ -47,7 +40,6 @@ def get_proxy_opener():
     return urllib.request.build_opener(proxy_handler)
 
 def get_data(opener, url):
-    """通用HTTP请求函数"""
     try:
         req = urllib.request.Request(url, headers=HEADERS)
         with opener.open(req) as response:
@@ -57,7 +49,6 @@ def get_data(opener, url):
         return None
 
 def get_market_rank(opener):
-    """获取24小时涨幅榜 Top 10"""
     url = "https://fapi.binance.com/fapi/v1/ticker/24hr"
     data = get_data(opener, url)
     if not data: return {}, []
@@ -68,7 +59,6 @@ def get_market_rank(opener):
     
     for item in data:
         symbol = item['symbol']
-        # 过滤掉超过10分钟无成交的僵尸币种
         if current_ts - int(item['closeTime']) > 10 * 60 * 1000:
             continue
         price = float(item['lastPrice'])
@@ -76,12 +66,10 @@ def get_market_rank(opener):
         market_map[symbol] = price
         rank_list.append({'symbol': symbol, 'change': change, 'price': price})
         
-    # 按涨幅降序排列，取前10
     rank_list.sort(key=lambda x: x['change'], reverse=True)
     return market_map, rank_list[:POSITIONS_COUNT]
 
 def get_recent_high_price(opener, symbol):
-    """获取过去15分钟K线的最高价 (用于插针检测)"""
     safe_symbol = urllib.parse.quote(symbol)
     url = f"https://fapi.binance.com/fapi/v1/klines?symbol={safe_symbol}&interval=15m&limit=1"
     data = get_data(opener, url)
@@ -90,11 +78,6 @@ def get_recent_high_price(opener, symbol):
     return 0.0
 
 def calculate_strategy_equity(strategy, market_map, opener=None, use_high_price=False):
-    """
-    核心计算函数：计算策略当前的剩余净值
-    :param use_high_price: True则使用15m最高价(用于风控), False则使用现价(用于报表)
-    :return: (equity, details_list)
-    """
     wallet_balance = strategy['balance']
     positions = strategy['positions']
     
@@ -111,14 +94,12 @@ def calculate_strategy_equity(strategy, market_map, opener=None, use_high_price=
             calc_price = curr
             warn_msg = ""
             
-            # 如果需要插针检测 (Opener 不为空且指定了 use_high_price)
             if opener and use_high_price:
                 high_15m = get_recent_high_price(opener, symbol)
                 if high_15m > 0:
                     calc_price = max(curr, high_15m)
                     if high_15m > entry * 1.05: warn_msg = "⚠️"
 
-            # 做空盈亏 = (开仓 - 结算) * 数量
             pnl = (entry - calc_price) * amount
             total_unrealized_pnl += pnl
             
@@ -135,39 +116,39 @@ def calculate_strategy_equity(strategy, market_map, opener=None, use_high_price=
     equity = wallet_balance + total_unrealized_pnl
     return equity, details
 
-def log_to_csv(record_type, strategy_id, symbol, price, high_price, amount, pos_pnl, equity, total_invested, note=""):
+def log_to_csv(record_type, strategy_id, symbol, price, high_price, amount, pos_pnl, equity, total_invested, used_margin, round_pnl, note=""):
     """
-    日志记录函数
-    优化：控制台打印所有日志，但CSV文件只记录关键交易事件，避免文件膨胀。
+    日志记录函数 (修复刷屏版)
     """
     file_exists = os.path.isfile(HISTORY_FILE)
     current_time = time.strftime('%Y-%m-%d %H:%M:%S')
     
     equity_val = float(equity)
     invested_val = float(total_invested)
+    used_margin_val = float(used_margin)
+    round_pnl_val = float(round_pnl)
     
-    # 1. 控制台日志：永远打印，方便在线调试
-    print(f"📝 [CSV] {record_type:<10} 策略{strategy_id:<2} {symbol:<8} 净值:{equity_val:.0f} 投入:{invested_val:.0f} | {note}")
-
-    # 2. CSV文件过滤：只记录真正的资金变动
-    # 白名单：OPEN(开仓), CLOSE(平仓), LIQUIDATION(爆仓), REPLENISH(补钱), WITHDRAW(提钱)
-    # 被过滤：MONITOR(监控), INFO(信息), SKIP(跳过)
+    # === [关键修改] ===
+    # 必须先检查白名单，不在白名单里的，连 print 都不许执行
     CRITICAL_EVENTS = ["OPEN", "CLOSE", "LIQUIDATION", "REPLENISH", "WITHDRAW"]
     
     if record_type not in CRITICAL_EVENTS:
-        return # 如果不是关键事件，直接结束，不写入文件
+        return # 直接退出，绝对静默
+
+    # 只有关键事件才打印到控制台
+    print(f"📝 [CSV] {record_type:<10} S{strategy_id:<2} {symbol:<8} 净:{equity_val:.0f} 投:{invested_val:.0f} 押:{used_margin_val:.0f} 轮:{round_pnl_val:+.0f} | {note}")
 
     try:
         with open(HISTORY_FILE, 'a', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             if not file_exists:
-                writer.writerow(["Time", "Strategy_ID", "Type", "Symbol", "Price", "15m_High", "Amount", "Pos_PnL", "Strategy_Equity", "Total_Invested", "Note"])
-            writer.writerow([current_time, strategy_id, record_type, symbol, price, high_price, amount, pos_pnl, equity_val, invested_val, note])
+                writer.writerow(["Time", "Strategy_ID", "Type", "Symbol", "Price", "15m_High", "Amount", "Pos_PnL", "Strategy_Equity", "Total_Invested", "Used_Margin", "Round_PnL", "Note"])
+            
+            writer.writerow([current_time, strategy_id, record_type, symbol, price, high_price, amount, pos_pnl, equity_val, invested_val, used_margin_val, round_pnl_val, note])
     except Exception as e:
         print(f"❌ 写入历史CSV失败: {e}")
 
 def record_equity_snapshot(data, market_map):
-    """记录净值曲线，用于后续画图"""
     file_exists = os.path.isfile(EQUITY_FILE)
     current_time = time.strftime('%Y-%m-%d %H:%M:%S')
     
@@ -198,12 +179,7 @@ def record_equity_snapshot(data, market_map):
     except Exception as e:
         print(f"❌ 写入净值CSV失败: {e}")
 
-# ==========================================
-#               状态管理函数
-# ==========================================
-
 def load_state():
-    """加载策略状态，包含数据结构自动升级"""
     if not os.path.exists(STATE_FILE):
         data = {}
         for i in range(24):
@@ -217,7 +193,6 @@ def load_state():
         return data
     with open(STATE_FILE, 'r') as f:
         data = json.load(f)
-    # 兼容旧版本数据
     for k, v in data.items():
         if "total_invested" not in v: v["total_invested"] = INITIAL_UNIT
         if "liquidation_count" not in v: v["liquidation_count"] = 0
@@ -232,33 +207,42 @@ def save_state(data):
 # ==========================================
 
 def check_risk_management(opener, data, market_map):
-    """
-    风控检查：检测是否爆仓
-    如果爆仓，只清零余额和仓位，记录次数，不立即补钱（等到轮动时补）
-    """
-    print("\n🛡️ [监控] 开始全仓风控检查 (含插针检测)...")
+    print("\n🛡️ [监控] 开始全仓风控检查...")
     liquidated_ids = [] 
     
     for s_id in data:
         strategy = data[s_id]
-        # 如果已经没钱了且没仓位，说明已经死透了等待复活，跳过检查
         if strategy['balance'] <= 0 and not strategy['positions']:
             continue
             
         equity, details = calculate_strategy_equity(strategy, market_map, opener, use_high_price=True)
         invested = strategy.get('total_invested', INITIAL_UNIT)
-
-        # 这里的 MONITOR 日志只会在控制台打印，不会写入CSV文件（被log_to_csv过滤了）
-        for d in details:
-            log_to_csv("MONITOR", s_id, d['symbol'], d['curr'], d['calc_price'], d['amount'], d['pnl'], equity, invested, "全仓监控")
-
-        # 爆仓判定
+        
+        used_margin = 0
+        if strategy['positions']:
+            used_margin = sum([p.get('margin', 0) for p in strategy['positions']])
+        round_pnl = equity - strategy['balance'] 
+        
+        # --- [极简输出逻辑] ---
+        if details:
+            coin_details_list = []
+            for d in details:
+                short_symbol = d['symbol'].replace("USDT", "")
+                warn = "!" if d.get('warn') else ""
+                coin_str = f"{short_symbol}({d['pnl']:+.0f}){warn}"
+                coin_details_list.append(coin_str)
+            
+            all_coins_str = " ".join(coin_details_list)
+            pnl = equity - invested
+            # 这里只用 print，不再调用 log_to_csv("MONITOR")
+            print(f"   >> S{s_id:<2} 净:{equity:>5.0f} ({pnl:>+5.0f}) 押:{used_margin:>4.0f} 轮:{round_pnl:>+5.0f} | {all_coins_str}")
+        
         if equity <= 0:
             print(f"💥 策略 {s_id} 触发全仓爆仓! 净值归零")
             liquidated_ids.append(s_id)
             for d in details:
-                # 爆仓是关键事件，会写入CSV
-                log_to_csv("LIQUIDATION", s_id, d['symbol'], d['calc_price'], d['calc_price'], d['amount'], d['pnl'], 0, invested, "全仓强平")
+                # 爆仓是关键事件，调用 log_to_csv 会正常打印和记录
+                log_to_csv("LIQUIDATION", s_id, d['symbol'], d['calc_price'], d['calc_price'], d['amount'], d['pnl'], 0, invested, used_margin, -used_margin, "全仓强平")
             
             strategy['balance'] = 0
             strategy['positions'] = []
@@ -266,27 +250,17 @@ def check_risk_management(opener, data, market_map):
             
     return liquidated_ids
 
-def execute_rotation(opener, data, market_map, top_10):
-    """
-    策略轮动/补单逻辑
-    包含：平旧仓、复活补钱、回本提现、开新仓
-    """
-    current_hour = str(datetime.utcnow().hour)
-    today_str = datetime.utcnow().strftime('%Y-%m-%d')
-    strategy = data[current_hour]
+def execute_single_strategy(s_id, strategy, opener, market_map, top_10, current_utc, target_date_str, is_late_close_only):
+    print(f"\n⚡ [操作] 策略 {s_id} (延迟模式: {'是' if is_late_close_only else '否'})")
     
-    # 如果今天已经在这个小时操作过了，直接退出
-    if strategy['last_trade_date'] == today_str:
-        return None
-
-    print(f"\n🔄 [执行] 策略 {current_hour} 轮动逻辑...")
-    
-    # 1. 平旧仓
     total_close_pnl = 0
     wallet_balance = strategy['balance']
     invested = strategy['total_invested']
     
+    # 1. 平旧仓
     if wallet_balance > 0 and strategy['positions']:
+        used_margin = sum([p.get('margin', 0) for p in strategy['positions']])
+        
         for pos in strategy['positions']:
             symbol = pos['symbol']
             entry = float(pos['entry_price'])
@@ -295,46 +269,49 @@ def execute_rotation(opener, data, market_map, top_10):
             pnl = (entry - exit_price) * amount
             total_close_pnl += pnl
             temp_equity = wallet_balance + total_close_pnl
-            log_to_csv("CLOSE", current_hour, symbol, exit_price, exit_price, amount, pnl, temp_equity, invested, "轮动平仓")
+            log_to_csv("CLOSE", s_id, symbol, exit_price, exit_price, amount, pnl, temp_equity, invested, used_margin, pnl, "轮动平仓")
 
         strategy['balance'] += total_close_pnl
         strategy['positions'] = []
     
     current_equity = strategy['balance']
     
-    # 2. 复活检测 (只有死透了才补钱)
+    # 2. 严重延迟处理
+    if is_late_close_only:
+        strategy['last_trade_date'] = target_date_str
+        print(f"🚫 策略 {s_id} 延迟超过1小时，仅执行平仓。")
+        return "CLOSED_ONLY"
+
+    # 3. 复活检测
     if current_equity < MIN_ALIVE_BALANCE:
-        print(f"💀 策略 {current_hour} 已归零，执行复活程序...")
+        print(f"💀 策略 {s_id} 已归零，执行复活程序...")
         strategy['balance'] = INITIAL_UNIT
         strategy['total_invested'] += INITIAL_UNIT
         current_equity = strategy['balance']
-        log_to_csv("REPLENISH", current_hour, "USDT", 0, 0, 0, 0, current_equity, strategy['total_invested'], "爆仓后重新投入")
+        log_to_csv("REPLENISH", s_id, "USDT", 0, 0, 0, 0, current_equity, strategy['total_invested'], 0, 0, "爆仓复活")
     
-    # 3. 回本机制 (如果开启且赚够了)
+    # 4. 回本机制
     elif ENABLE_ROI_PAYBACK and current_equity >= (INITIAL_UNIT * 2):
         withdraw_amount = INITIAL_UNIT
         strategy['balance'] -= withdraw_amount
-        strategy['total_invested'] -= withdraw_amount # 减少投入记录
-        print(f"💰 策略 {current_hour} 触发回本机制: 提取 {withdraw_amount}U!")
-        log_to_csv("WITHDRAW", current_hour, "USDT", 0, 0, 0, 0, strategy['balance'], strategy['total_invested'], "回本提取")
+        strategy['total_invested'] -= withdraw_amount
+        print(f"💰 策略 {s_id} 触发回本: 提取 {withdraw_amount}U")
+        log_to_csv("WITHDRAW", s_id, "USDT", 0, 0, 0, 0, strategy['balance'], strategy['total_invested'], 0, 0, "回本提取")
         current_equity = strategy['balance'] 
 
-    # 4. 开新仓 (根据复利开关决定本金)
+    # 5. 开新仓
     trading_capital = current_equity
     if not ENABLE_COMPOUNDING:
-        # 锁定注码模式：无论赚多少，只用初始本金开仓
         if trading_capital > INITIAL_UNIT:
             trading_capital = INITIAL_UNIT
-            print(f"🔒 策略 {current_hour} 关闭复利: 余额 {current_equity:.1f}U, 限制开仓资金为 {trading_capital}U")
     
     if trading_capital < 1.0: 
-        log_to_csv("SKIP", current_hour, "ALL", 0, 0, 0, 0, current_equity, strategy['total_invested'], "资金不足")
+        log_to_csv("SKIP", s_id, "ALL", 0, 0, 0, 0, current_equity, strategy['total_invested'], 0, 0, "资金不足")
     else:
         margin_per_coin = trading_capital / POSITIONS_COUNT
+        entry_ts = int(time.time())
+        total_used_margin = trading_capital
         
-        top10_str = "|".join([x['symbol'] for x in top_10])
-        log_to_csv("INFO", current_hour, "TOP10_LIST", 0, 0, 0, 0, current_equity, strategy['total_invested'], top10_str)
-
         new_positions = []
         for item in top_10:
             symbol = item['symbol']
@@ -346,20 +323,63 @@ def execute_rotation(opener, data, market_map, top_10):
                 "entry_price": price,
                 "margin": margin_per_coin,
                 "amount": amount,
-                "leverage": LEVERAGE
+                "leverage": LEVERAGE,
+                "entry_time": entry_ts
             })
-            log_to_csv("OPEN", current_hour, symbol, price, price, amount, 0, current_equity, strategy['total_invested'], "开空")
+            log_to_csv("OPEN", s_id, symbol, price, price, amount, 0, current_equity, strategy['total_invested'], total_used_margin, 0, "开空")
             
         strategy['positions'] = new_positions
 
-    strategy['last_trade_date'] = today_str
-    return current_hour
+    strategy['last_trade_date'] = target_date_str
+    return "ROTATED"
+
+def scan_and_execute_strategies(opener, data, market_map, top_10):
+    rotated_ids = []
+    closed_only_ids = []
+    
+    current_utc = datetime.utcnow()
+    print(f"\n🔍 [扫描] 当前UTC时间: {current_utc.strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    for i in range(24):
+        s_id = str(i)
+        strategy = data[s_id]
+        
+        sched_time_today = datetime(current_utc.year, current_utc.month, current_utc.day, i, 0, 0)
+        
+        if current_utc >= sched_time_today:
+            target_dt = sched_time_today
+        else:
+            target_dt = sched_time_today - timedelta(days=1)
+            
+        target_date_str = target_dt.strftime('%Y-%m-%d')
+        
+        if strategy['last_trade_date'] == target_date_str:
+            continue 
+            
+        delay_seconds = (current_utc - target_dt).total_seconds()
+        print(f"   >> 发现策略 {s_id} 待处理: 应执行时间 {target_dt} (延迟 {delay_seconds/60:.1f} 分钟)")
+        
+        is_late_close_only = False
+        if delay_seconds > MAX_DELAY_SECONDS:
+            is_late_close_only = True
+            
+        result = execute_single_strategy(
+            s_id, strategy, opener, market_map, top_10, 
+            current_utc, target_date_str, is_late_close_only
+        )
+        
+        if result == "ROTATED":
+            rotated_ids.append(s_id)
+        elif result == "CLOSED_ONLY":
+            closed_only_ids.append(s_id)
+            
+    return rotated_ids, closed_only_ids
 
 # ==========================================
 #               通知与主程序
 # ==========================================
 
-def report_to_wechat(opener, data, market_map, rotated_id, liquidated_ids):
+def report_to_wechat(opener, data, market_map, rotated_ids, closed_only_ids, liquidated_ids):
     if not SERVERCHAN_KEY: 
         print("⚠️ 未配置 SERVERCHAN_KEY，跳过通知")
         return
@@ -371,8 +391,11 @@ def report_to_wechat(opener, data, market_map, rotated_id, liquidated_ids):
     total_liquidations = 0
     max_profit = -999999
     
-    md_table = "| ID | 投入 | 净值 | 盈亏 | 爆 |\n| :--: | :--: | :--: | :--: | :--: |\n"
+    md_table = "| ID | 投入 | 押金 | 净值 | 总盈 | 轮盈 | 爆 |\n| :--: | :--: | :--: | :--: | :--: | :--: | :--: |\n"
     detail_text = ""
+    current_ts = int(time.time())
+    
+    all_action_ids = set(rotated_ids + closed_only_ids + liquidated_ids)
     
     for i in range(24):
         s_id = str(i)
@@ -383,55 +406,78 @@ def report_to_wechat(opener, data, market_map, rotated_id, liquidated_ids):
         
         equity, details = calculate_strategy_equity(strat, market_map, opener, use_high_price=False)
         
+        used_margin = 0
+        if strat['positions']:
+            used_margin = sum([p.get('margin', 0) for p in strat['positions']])
+        round_pnl = equity - strat['balance']
+        net_pnl = equity - invested
+        
         total_equity += equity
         total_invested_all += invested
         total_liquidations += liq_count
         
-        net_pnl = equity - invested
         if net_pnl > max_profit: max_profit = net_pnl
 
-        # 状态图标逻辑
         icon = "🔴" if net_pnl < 0 else "🟢"
         if equity == 0: icon = "💀" 
-        elif s_id == rotated_id: icon = "🔄"
+        elif s_id in rotated_ids: icon = "🔄"
+        elif s_id in closed_only_ids: icon = "🛑"
         
         liq_str = str(liq_count) if liq_count > 0 else "-"
         inv_display = f"{invested:.0f}"
         
-        md_table += f"| {s_id} | {inv_display} | {equity:.0f} | {icon}{net_pnl:+.0f} | {liq_str} |\n"
+        round_pnl_str = f"{round_pnl:+.0f}" if strat['positions'] else "-"
+        margin_str = f"{used_margin:.0f}" if strat['positions'] else "-"
+        
+        md_table += f"| {s_id} | {inv_display} | {margin_str} | {equity:.0f} | {icon}{net_pnl:+.0f} | {round_pnl_str} | {liq_str} |\n"
 
-        # 生成持仓详情
         pos_len = len(strat['positions'])
-        if pos_len > 0:
-            prefix = "🔄" if s_id == rotated_id else ""
-            detail_text += f"\n🔷 **{prefix}S{s_id}** (投:{invested:.0f} 净:{equity:.0f}):\n"
-            simple_items = []
-            for d in details:
-                warn_mark = "⚠️" if d.get('warn') else ""
-                short_symbol = d['symbol'].replace("USDT", "")
-                item_str = f"{short_symbol}({d['pnl']:+.1f}){warn_mark}"
-                simple_items.append(item_str)
-            detail_text += ", ".join(simple_items) + "\n"
-        elif equity == 0:
-             detail_text += f"\n💀 **S{s_id}** (待复活): 累计爆仓 {liq_count} 次\n"
+        should_show_detail = (pos_len > 0) or (s_id in all_action_ids) or (equity==0)
+        
+        if should_show_detail:
+            prefix = ""
+            if s_id in rotated_ids: prefix = "🔄"
+            elif s_id in closed_only_ids: prefix = "🛑"
+            
+            duration_str = "-"
+            if pos_len > 0:
+                first_pos = strat['positions'][0]
+                entry_time = first_pos.get('entry_time', 0)
+                if entry_time > 0:
+                    duration_hours = (current_ts - entry_time) / 3600
+                    duration_str = f"{duration_hours:.1f}h"
+            
+            liq_mark = f" 💀x{liq_count}" if liq_count > 0 else ""
+            
+            if s_id in closed_only_ids:
+                detail_text += f"\n🛑 **S{s_id}** (严重延迟 >1h): 仅平仓, 等待明日重启。\n"
+            elif pos_len > 0:
+                detail_text += f"\n🔷 **{prefix}S{s_id}** (投:{invested:.0f}{liq_mark} 押:{used_margin:.0f} 轮:{round_pnl:+.0f} ⏱️{duration_str}):\n"
+                simple_items = []
+                for d in details:
+                    warn_mark = "⚠️" if d.get('warn') else ""
+                    short_symbol = d['symbol'].replace("USDT", "")
+                    item_str = f"{short_symbol}({d['pnl']:+.1f}){warn_mark}"
+                    simple_items.append(item_str)
+                detail_text += ", ".join(simple_items) + "\n"
+            elif equity == 0:
+                detail_text += f"\n💀 **S{s_id}** (待复活): 累计爆仓 {liq_count} 次\n"
 
-    # 全局统计
     total_pnl = total_equity - total_invested_all
     if total_invested_all <= 0: total_pnl_pct = 999.9 
     else: total_pnl_pct = (total_pnl / total_invested_all) * 100
 
     current_utc = datetime.utcnow().strftime("%H:%M")
     
-    # 动态标题
     title_parts = []
-    if rotated_id: title_parts.append(f"🔄S{rotated_id}")
+    if rotated_ids: title_parts.append(f"🔄S{','.join(rotated_ids)}")
+    if closed_only_ids: title_parts.append(f"🛑S{','.join(closed_only_ids)}")
     if liquidated_ids: title_parts.append(f"💥{len(liquidated_ids)}个")
     
     title_base = f"投{total_invested_all:.0f} 剩{total_equity:.0f} ({total_pnl_pct:+.1f}%)"
     if title_parts: title = f"{' '.join(title_parts)} | {title_base}"
     else: title = f"策略日报: {title_base}"
     
-    # 描述中的开关状态
     switch_status = []
     if ENABLE_COMPOUNDING: switch_status.append("🔥复利开启")
     else: switch_status.append("🔒单利模式")
@@ -447,7 +493,7 @@ def report_to_wechat(opener, data, market_map, rotated_id, liquidated_ids):
 ---
 {md_table}
 ---
-### 📝 持仓概览
+### 📝 动态与持仓
 {detail_text}
     """
     
@@ -471,17 +517,16 @@ if __name__ == "__main__":
     if market_map:
         data = load_state()
         
-        # 1. 风控 (Monitor 和 Liquidation 会发生在这里)
+        # 1. 风控 (仅输出 summary，除非爆仓)
         liquidated_ids = check_risk_management(opener, data, market_map)
         
-        # 2. 轮动 (Open, Close, Replenish, Withdraw 会发生在这里)
-        rotated_id = execute_rotation(opener, data, market_map, top_10)
+        # 2. 智能扫描
+        rotated_ids, closed_only_ids = scan_and_execute_strategies(opener, data, market_map, top_10)
         
-        # 3. 记录净值 (仅用于画图，不写history csv)
+        # 3. 记录净值
         record_equity_snapshot(data, market_map)
         
         save_state(data)
         
-        # 只有在有重要事件时才发微信
-        if rotated_id or liquidated_ids:
-            report_to_wechat(opener, data, market_map, rotated_id, liquidated_ids)
+        if rotated_ids or closed_only_ids or liquidated_ids:
+            report_to_wechat(opener, data, market_map, rotated_ids, closed_only_ids, liquidated_ids)
