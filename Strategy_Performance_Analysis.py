@@ -17,8 +17,7 @@ def send_wechat_msg(title, content):
         print(f"⚠️ 未配置 SERVERCHAN_KEY，只打印不发送。\n标题: {title}\n内容:\n{content}")
         return
 
-    # 微信显示优化：Markdown 换行需要两个换行符
-    # 这一步非常关键，否则表格会挤在一起
+    # Server酱特定优化：两个换行符才能在微信中正确换行
     content = content.replace('\n', '\n\n')
     
     url = f"https://sctapi.ftqq.com/{SERVERCHAN_KEY}.send"
@@ -33,13 +32,12 @@ def send_wechat_msg(title, content):
 def robust_read_csv(filename, col_names):
     if not os.path.exists(filename): return pd.DataFrame()
     try:
-        # 使用 python 引擎 + 跳过坏行，最大限度防止报错
         df = pd.read_csv(
-            filename, 
-            names=col_names, 
-            header=None, 
-            skiprows=1, 
-            engine='python', 
+            filename,
+            names=col_names,
+            header=None,
+            skiprows=1,
+            engine='python',
             on_bad_lines='skip'
         )
         return df
@@ -54,6 +52,7 @@ def calculate_max_drawdown(equity_series):
     return drawdown.min() * 100
 
 def get_open_time_str(s_id_int):
+    # 返回简短的时间格式，如 "06点"
     hour = (8 + s_id_int) % 24
     return f"{hour:02d}点"
 
@@ -67,7 +66,7 @@ def analyze_market_mechanics(history_df):
     df = df.dropna(subset=['Price'])
     df['Time_CN'] = df['Time'] + timedelta(hours=8)
 
-    # --- 1. 昨日新币复盘 (Markdown 表格) ---
+    # --- 1. 昨日新币复盘 ---
     now = datetime.now()
     yesterday = now - timedelta(hours=24)
     recent_df = df[df['Time'] > yesterday].copy()
@@ -84,43 +83,52 @@ def analyze_market_mechanics(history_df):
             
             t0 = entries_24h.iloc[0]
             t0_p = t0['Price']
-            t0_t = t0['Time']
             
-            subsequent = coin_hist[coin_hist['Time'] >= t0_t]
+            subsequent = coin_hist[coin_hist['Time'] >= t0['Time']]
             if subsequent.empty: continue
             
             max_p = subsequent['Price'].max()
             curr_p = subsequent.iloc[-1]['Price']
             
+            # 这里的涨幅是相对于第一次上榜
             max_pump = (max_p - t0_p) / t0_p * 100
             curr_chg = (curr_p - t0_p) / t0_p * 100
             
+            # 找到最高点延迟
             max_row = subsequent[subsequent['Price'] == max_p].iloc[0]
-            delay = (max_row['Time'] - t0_t).total_seconds() / 3600
+            delay = (max_row['Time'] - t0['Time']).total_seconds() / 3600
+            
+            # 格式化时间，只取小时
+            time_str = t0['Time_CN'].strftime("%H:%M")
             
             coin_data.append({
-                "coin": symbol.replace('USDT',''),
-                "time": t0['Time_CN'].strftime("%H:%M"),
+                "sym": symbol.replace('USDT',''),
+                "time": time_str,
                 "pump": max_pump,
                 "delay": int(delay),
                 "curr": curr_chg
             })
             
         if coin_data:
-            # 按最高涨幅排序
             coin_data.sort(key=lambda x: x['pump'], reverse=True)
-            review_md = "| 币种 | 上榜 | 最高涨 | 现价 |\n| :-- | :--: | :--: | :--: |\n"
+            # 3列：币种(时间) | 最高涨 | 现价
+            review_md = "| 币种(上榜) | 最高涨 | 现价 |\n| :-- | :--: | :--: |\n"
             for c in coin_data:
-                pump_str = f"{c['pump']:+.1f}%(+{c['delay']}h)"
+                # 组合显示：SOL(10:00)
+                coin_str = f"{c['sym']}<br>{c['time']}"
+                # 组合显示：+15%(5h)
+                pump_str = f"{c['pump']:+.0f}%({c['delay']}h)"
                 if c['pump'] > 10: pump_str = f"🔥{pump_str}"
-                curr_str = f"{c['curr']:+.1f}%"
-                review_md += f"| {c['coin']} | {c['time']} | {pump_str} | {curr_str} |\n"
+                
+                curr_str = f"{c['curr']:+.0f}%"
+                
+                review_md += f"| {coin_str} | {pump_str} | {curr_str} |\n"
         else:
             review_md = "无新币数据"
     else:
-        review_md = "过去24h无新币上榜"
+        review_md = "过去24h无新币"
 
-    # --- 2. 历史最佳做空时机 (Markdown 表格) ---
+    # --- 2. 最佳做空时机 ---
     df['Date'] = df['Time'].dt.date
     grouped = df.groupby(['Symbol', 'Date'])
     
@@ -143,16 +151,16 @@ def analyze_market_mechanics(history_df):
         summary = res_df.groupby('delay')['chg'].agg(['mean', 'count']).reset_index()
         summary = summary[summary['count'] >= 3]
         
+        # 3列：延迟 | 均涨跌 | 建议
         best_time_md = "| 延迟 | 均涨跌 | 建议 |\n| :--: | :--: | :--: |\n"
         for _, row in summary.iterrows():
             h = int(row['delay'])
             avg = row['mean']
             
             s = "👀"
-            if avg > 10: s = "⛔️高危"
-            elif avg > 5: s = "🚀暴涨"
-            elif avg > 0: s = "⏳微涨"
-            elif avg < -1: s = "✅转跌"
+            if avg > 8: s = "⛔️"
+            elif avg > 3: s = "🚀"
+            elif avg < -1: s = "✅"
             
             best_time_md += f"| +{h}h | {avg:+.1f}% | {s} |\n"
     else:
@@ -161,14 +169,13 @@ def analyze_market_mechanics(history_df):
     return review_md, best_time_md
 
 def analyze_strategies():
-    print("📊 生成 Markdown 报告...")
+    print("📊 生成精简版 Markdown 报告...")
 
     HISTORY_COLS = [
         "Time", "Strategy_ID", "Type", "Symbol", "Price", "15m_High", 
         "Amount", "Pos_PnL", "Strategy_Equity", "Total_Invested", 
         "Used_Margin", "Round_PnL", "24h_Change", "Note"
     ]
-    # 增加列数定义以防止读取报错
     EQUITY_COLS = ['Time'] + [f'S_{i}' for i in range(24)] + ['Total_Equity', 'Total_Invested', 'Extra']
 
     history_df = robust_read_csv(HISTORY_FILE, HISTORY_COLS)
@@ -195,69 +202,71 @@ def analyze_strategies():
         s_id = str(i)
         rounds_res = history_df[(history_df['Strategy_ID'] == i) & (history_df['Type'] == 'ROUND_RES')]
         
-        pnl = 0; wins = 0; total = 0; max_loss = 0
+        pnl = 0; wins = 0; total = 0
         
         if len(rounds_res) > 0:
             pnl = rounds_res['Round_PnL'].sum()
             total = len(rounds_res)
             wins = len(rounds_res[rounds_res['Round_PnL'] > 0])
-            max_loss = rounds_res['Round_PnL'].min()
         elif not rounds_fallback.empty:
             strat_r = rounds_fallback[rounds_fallback['Strategy_ID'] == i]
             if len(strat_r) > 0:
                 pnl = strat_r['Pos_PnL'].sum()
                 total = len(strat_r)
                 wins = len(strat_r[strat_r['Pos_PnL'] > 0])
-                max_loss = strat_r['Pos_PnL'].min()
         else:
             col = f"S_{i}"
             if col in equity_df.columns:
                 s = pd.to_numeric(equity_df[col], errors='coerce').dropna()
                 if len(s)>0: pnl = s.iloc[-1] - 1000
 
-        if max_loss > 0: max_loss = 0
-        win_str = f"{int(wins/total*100)}%({wins}/{total})" if total > 0 else "0/0"
+        # 胜率
+        win_rate = int(wins/total*100) if total > 0 else 0
         
+        # 回撤
         max_dd = 0.0
         col = f"S_{i}"
         if col in equity_df.columns: max_dd = calculate_max_drawdown(equity_df[col])
         
-        # 简化ID显示 S22(06)
-        id_str = f"S{s_id}({get_open_time_str(i).replace('点','')})"
+        # 格式化 ID: S22(06点)
+        id_str = f"S{s_id}<br>{get_open_time_str(i)}"
         
         stats_list.append({
             "id": id_str,
             "pnl": pnl,
-            "win": win_str,
-            "dd": max_dd,
-            "loss": max_loss
+            "win": win_rate,
+            "dd": max_dd
         })
 
     stats_list.sort(key=lambda x: x['pnl'], reverse=True)
     
-    # 3. 生成排行榜 Markdown 表格
-    rank_md = "| ID(时) | 胜率 | 总盈 | 回撤 | 单亏 |\n| :-- | :--: | :--: | :--: | :--: |\n"
+    # 3. 生成排行榜 (强制 3 列布局)
+    # 策略(时) | 盈(撤) | 胜率
+    rank_md = "| 策略(时) | 盈(撤) | 胜率 |\n| :-- | :--: | :--: |\n"
+    
     for s in stats_list:
-        pnl_s = f"{s['pnl']:.0f}"
-        dd_s = f"{s['dd']:.1f}%"
-        loss_s = f"{s['loss']:.0f}"
-        rank_md += f"| {s['id']} | {s['win']} | {pnl_s} | {dd_s} | {loss_s} |\n"
+        # 合并 盈亏和回撤：+734(0%)
+        pnl_dd_str = f"{s['pnl']:.0f}({s['dd']:.0f}%)"
+        # 胜率：100%
+        win_str = f"{s['win']}%"
+        
+        rank_md += f"| {s['id']} | {pnl_dd_str} | {win_str} |\n"
 
-    # 4. 组装最终消息
+    # 4. 发送
     current_time = datetime.now().strftime("%m-%d %H:%M")
-    top_performer = stats_list[0]['id'] if stats_list else "None"
+    top_performer = stats_list[0]['id'].split('<br>')[0] if stats_list else "None"
     
     title = f"📈 策略日报: {top_performer} 领跑"
     content = f"""
 **{current_time} (UTC+8)**
 
-### 🔥 昨日新币复盘
+### 🔥 昨日新币
 {review_md}
 
-### ⏳ 历史做空规律
+### ⏳ 做空时机
 {best_time_md}
 
-### 🏆 策略排行榜
+### 🏆 策略排行
 {rank_md}
     """
     
