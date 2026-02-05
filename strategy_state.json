@@ -2,85 +2,95 @@
   "0": {
     "balance": 1000.0,
     "positions": [],
-    "last_trade_date": "2026-02-04",
+    "last_trade_date": "2026-02-05",
     "total_invested": 1000.0,
     "liquidation_count": 0
   },
   "1": {
-    "balance": 862.5219336731604,
+    "balance": 1009.7529585045729,
     "positions": [
       {
+        "symbol": "\u6211\u8e0f\u9a6c\u6765\u4e86USDT",
+        "entry_price": 0.043765,
+        "margin": 100.97529585045729,
+        "amount": 6921.647150722537,
+        "leverage": 3.0,
+        "entry_time": 1770255999
+      },
+      {
+        "symbol": "RIVERUSDT",
+        "entry_price": 14.335,
+        "margin": 100.97529585045729,
+        "amount": 21.131907049276023,
+        "leverage": 3.0,
+        "entry_time": 1770255999
+      },
+      {
+        "symbol": "COAIUSDT",
+        "entry_price": 0.3108,
+        "margin": 100.97529585045729,
+        "amount": 974.6650178615566,
+        "leverage": 3.0,
+        "entry_time": 1770255999
+      },
+      {
+        "symbol": "JELLYJELLYUSDT",
+        "entry_price": 0.0599,
+        "margin": 100.97529585045729,
+        "amount": 5057.19344826998,
+        "leverage": 3.0,
+        "entry_time": 1770255999
+      },
+      {
+        "symbol": "COLLECTUSDT",
+        "entry_price": 0.03692,
+        "margin": 100.97529585045729,
+        "amount": 8204.926531727297,
+        "leverage": 3.0,
+        "entry_time": 1770255999
+      },
+      {
+        "symbol": "MONUSDT",
+        "entry_price": 0.01967,
+        "margin": 100.97529585045729,
+        "amount": 15400.40099396908,
+        "leverage": 3.0,
+        "entry_time": 1770255999
+      },
+      {
+        "symbol": "ZKPUSDT",
+        "entry_price": 0.08817,
+        "margin": 100.97529585045729,
+        "amount": 3435.702478749822,
+        "leverage": 3.0,
+        "entry_time": 1770255999
+      },
+      {
+        "symbol": "CYSUSDT",
+        "entry_price": 0.3483,
+        "margin": 100.97529585045729,
+        "amount": 869.7269237765485,
+        "leverage": 3.0,
+        "entry_time": 1770255999
+      },
+      {
         "symbol": "BULLAUSDT",
-        "entry_price": 0.0302,
-        "margin": 86.25219336731604,
-        "amount": 8568.098678872453,
-        "leverage": 3.0
+        "entry_price": 0.03303,
+        "margin": 100.97529585045729,
+        "amount": 9171.234863801752,
+        "leverage": 3.0,
+        "entry_time": 1770255999
       },
       {
-        "symbol": "ARCUSDT",
-        "entry_price": 0.0744,
-        "margin": 86.25219336731604,
-        "amount": 3477.9110228756467,
-        "leverage": 3.0
-      },
-      {
-        "symbol": "CHESSUSDT",
-        "entry_price": 0.02703,
-        "margin": 86.25219336731604,
-        "amount": 9572.940440323644,
-        "leverage": 3.0
-      },
-      {
-        "symbol": "OGUSDT",
-        "entry_price": 4.188,
-        "margin": 86.25219336731604,
-        "amount": 61.785238801802315,
-        "leverage": 3.0
-      },
-      {
-        "symbol": "GUSDT",
-        "entry_price": 0.004726,
-        "margin": 86.25219336731604,
-        "amount": 54751.70971264242,
-        "leverage": 3.0
-      },
-      {
-        "symbol": "ALCHUSDT",
-        "entry_price": 0.09967,
-        "margin": 86.25219336731604,
-        "amount": 2596.1330400516513,
-        "leverage": 3.0
-      },
-      {
-        "symbol": "BIRBUSDT",
-        "entry_price": 0.28649,
-        "margin": 86.25219336731604,
-        "amount": 903.1958536142555,
-        "leverage": 3.0
-      },
-      {
-        "symbol": "SPACEUSDT",
-        "entry_price": 0.006624,
-        "margin": 86.25219336731604,
-        "amount": 39063.49337287864,
-        "leverage": 3.0
-      },
-      {
-        "symbol": "UBUSDT",
-        "entry_price": 0.03505,
-        "margin": 86.25219336731604,
-        "amount": 7382.498719028476,
-        "leverage": 3.0
-      },
-      {
-        "symbol": "\u5e01\u5b89\u4eba\u751fUSDT",
-        "entry_price": 0.14429,
-        "margin": 86.25219336731604,
-        "amount": 1793.309169741133,
-        "leverage": 3.0
+        "symbol": "SYNUSDT",
+        "entry_price": 0.08183,
+        "margin": 100.97529585045729,
+        "amount": 3701.892796668359,
+        "leverage": 3.0,
+        "entry_time": 1770255999
       }
     ],
-    "last_trade_date": "2026-02-04",
+    "last_trade_date": "2026-02-05",
     "total_invested": 1000.0,
     "liquidation_count": 0
   },
