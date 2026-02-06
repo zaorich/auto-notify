@@ -2,95 +2,95 @@
   "0": {
     "balance": 1000.0,
     "positions": [],
-    "last_trade_date": "2026-02-05",
+    "last_trade_date": "2026-02-06",
     "total_invested": 1000.0,
     "liquidation_count": 0
   },
   "1": {
-    "balance": 1009.7529585045729,
+    "balance": 1224.9517517941358,
     "positions": [
       {
-        "symbol": "\u6211\u8e0f\u9a6c\u6765\u4e86USDT",
-        "entry_price": 0.043765,
-        "margin": 100.97529585045729,
-        "amount": 6921.647150722537,
+        "symbol": "C98USDT",
+        "entry_price": 0.0297,
+        "margin": 122.49517517941358,
+        "amount": 12373.250018122582,
         "leverage": 3.0,
-        "entry_time": 1770255999
+        "entry_time": 1770342331
       },
       {
-        "symbol": "RIVERUSDT",
-        "entry_price": 14.335,
-        "margin": 100.97529585045729,
-        "amount": 21.131907049276023,
+        "symbol": "FIGHTUSDT",
+        "entry_price": 0.006627,
+        "margin": 122.49517517941358,
+        "amount": 55452.77282906907,
         "leverage": 3.0,
-        "entry_time": 1770255999
+        "entry_time": 1770342331
       },
       {
-        "symbol": "COAIUSDT",
-        "entry_price": 0.3108,
-        "margin": 100.97529585045729,
-        "amount": 974.6650178615566,
+        "symbol": "SKRUSDT",
+        "entry_price": 0.021477,
+        "margin": 122.49517517941358,
+        "amount": 17110.654446069784,
         "leverage": 3.0,
-        "entry_time": 1770255999
-      },
-      {
-        "symbol": "JELLYJELLYUSDT",
-        "entry_price": 0.0599,
-        "margin": 100.97529585045729,
-        "amount": 5057.19344826998,
-        "leverage": 3.0,
-        "entry_time": 1770255999
+        "entry_time": 1770342331
       },
       {
         "symbol": "COLLECTUSDT",
-        "entry_price": 0.03692,
-        "margin": 100.97529585045729,
-        "amount": 8204.926531727297,
+        "entry_price": 0.04571,
+        "margin": 122.49517517941358,
+        "amount": 8039.4995742341,
         "leverage": 3.0,
-        "entry_time": 1770255999
+        "entry_time": 1770342331
       },
       {
-        "symbol": "MONUSDT",
-        "entry_price": 0.01967,
-        "margin": 100.97529585045729,
-        "amount": 15400.40099396908,
+        "symbol": "THEUSDT",
+        "entry_price": 0.2425,
+        "margin": 122.49517517941358,
+        "amount": 1515.4042290236732,
         "leverage": 3.0,
-        "entry_time": 1770255999
+        "entry_time": 1770342331
       },
       {
-        "symbol": "ZKPUSDT",
-        "entry_price": 0.08817,
-        "margin": 100.97529585045729,
-        "amount": 3435.702478749822,
+        "symbol": "HANAUSDT",
+        "entry_price": 0.03645,
+        "margin": 122.49517517941358,
+        "amount": 10081.907422173956,
         "leverage": 3.0,
-        "entry_time": 1770255999
+        "entry_time": 1770342331
       },
       {
-        "symbol": "CYSUSDT",
-        "entry_price": 0.3483,
-        "margin": 100.97529585045729,
-        "amount": 869.7269237765485,
+        "symbol": "PARTIUSDT",
+        "entry_price": 0.08448,
+        "margin": 122.49517517941358,
+        "amount": 4349.9707094962205,
         "leverage": 3.0,
-        "entry_time": 1770255999
+        "entry_time": 1770342331
       },
       {
-        "symbol": "BULLAUSDT",
-        "entry_price": 0.03303,
-        "margin": 100.97529585045729,
-        "amount": 9171.234863801752,
+        "symbol": "FHEUSDT",
+        "entry_price": 0.10836,
+        "margin": 122.49517517941358,
+        "amount": 3391.339290681439,
         "leverage": 3.0,
-        "entry_time": 1770255999
+        "entry_time": 1770342331
       },
       {
-        "symbol": "SYNUSDT",
-        "entry_price": 0.08183,
-        "margin": 100.97529585045729,
-        "amount": 3701.892796668359,
+        "symbol": "CHESSUSDT",
+        "entry_price": 0.02864,
+        "margin": 122.49517517941358,
+        "amount": 12831.198517396673,
         "leverage": 3.0,
-        "entry_time": 1770255999
+        "entry_time": 1770342331
+      },
+      {
+        "symbol": "MYXUSDT",
+        "entry_price": 6.275,
+        "margin": 122.49517517941358,
+        "amount": 58.56343036465987,
+        "leverage": 3.0,
+        "entry_time": 1770342331
       }
     ],
-    "last_trade_date": "2026-02-05",
+    "last_trade_date": "2026-02-06",
     "total_invested": 1000.0,
     "liquidation_count": 0
   },
