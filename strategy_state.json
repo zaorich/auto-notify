@@ -97,103 +97,103 @@
   "2": {
     "balance": 1695.5023439585516,
     "positions": [],
-    "last_trade_date": "2026-02-05",
+    "last_trade_date": "2026-02-06",
     "total_invested": 1000.0,
     "liquidation_count": 0
   },
   "3": {
     "balance": 1082.7779872931203,
     "positions": [],
-    "last_trade_date": "2026-02-05",
+    "last_trade_date": "2026-02-06",
     "total_invested": 1000.0,
     "liquidation_count": 0
   },
   "4": {
-    "balance": 1937.2119633986629,
+    "balance": 1441.4070134044778,
     "positions": [
       {
-        "symbol": "\u6211\u8e0f\u9a6c\u6765\u4e86USDT",
-        "entry_price": 0.045364,
-        "margin": 193.72119633986628,
-        "amount": 12811.11870689531,
+        "symbol": "SKRUSDT",
+        "entry_price": 0.023686,
+        "margin": 144.14070134044778,
+        "amount": 18256.442794112274,
         "leverage": 3.0,
-        "entry_time": 1770264175
+        "entry_time": 1770350632
+      },
+      {
+        "symbol": "C98USDT",
+        "entry_price": 0.0307,
+        "margin": 144.14070134044778,
+        "amount": 14085.41055444115,
+        "leverage": 3.0,
+        "entry_time": 1770350632
       },
       {
         "symbol": "COLLECTUSDT",
-        "entry_price": 0.03764,
-        "margin": 193.72119633986628,
-        "amount": 15440.052843241201,
+        "entry_price": 0.04464,
+        "margin": 144.14070134044778,
+        "amount": 9686.875090083857,
         "leverage": 3.0,
-        "entry_time": 1770264175
+        "entry_time": 1770350632
       },
       {
-        "symbol": "BULLAUSDT",
-        "entry_price": 0.03432,
-        "margin": 193.72119633986628,
-        "amount": 16933.67100872957,
+        "symbol": "THEUSDT",
+        "entry_price": 0.2377,
+        "margin": 144.14070134044778,
+        "amount": 1819.1926967662741,
         "leverage": 3.0,
-        "entry_time": 1770264175
+        "entry_time": 1770350632
       },
       {
-        "symbol": "JELLYJELLYUSDT",
-        "entry_price": 0.05905,
-        "margin": 193.72119633986628,
-        "amount": 9841.889737842486,
+        "symbol": "FIGHTUSDT",
+        "entry_price": 0.006421,
+        "margin": 144.14070134044778,
+        "amount": 67344.97804412761,
         "leverage": 3.0,
-        "entry_time": 1770264175
+        "entry_time": 1770350632
       },
       {
-        "symbol": "ORDERUSDT",
-        "entry_price": 0.07178,
-        "margin": 193.72119633986628,
-        "amount": 8096.455684307591,
+        "symbol": "HANAUSDT",
+        "entry_price": 0.03521,
+        "margin": 144.14070134044778,
+        "amount": 12281.229878481776,
         "leverage": 3.0,
-        "entry_time": 1770264175
+        "entry_time": 1770350632
       },
       {
-        "symbol": "PLAYUSDT",
-        "entry_price": 0.09772,
-        "margin": 193.72119633986628,
-        "amount": 5947.232797990164,
+        "symbol": "FHEUSDT",
+        "entry_price": 0.11212,
+        "margin": 144.14070134044778,
+        "amount": 3856.7793794268937,
         "leverage": 3.0,
-        "entry_time": 1770264175
+        "entry_time": 1770350632
       },
       {
-        "symbol": "XNYUSDT",
-        "entry_price": 0.00413,
-        "margin": 193.72119633986628,
-        "amount": 140717.57603380116,
+        "symbol": "PARTIUSDT",
+        "entry_price": 0.08256,
+        "margin": 144.14070134044778,
+        "amount": 5237.670833591853,
         "leverage": 3.0,
-        "entry_time": 1770264175
+        "entry_time": 1770350632
       },
       {
-        "symbol": "MONUSDT",
-        "entry_price": 0.01937,
-        "margin": 193.72119633986628,
-        "amount": 30003.282861104744,
+        "symbol": "MYXUSDT",
+        "entry_price": 6.397,
+        "margin": 144.14070134044778,
+        "amount": 67.59764014715387,
         "leverage": 3.0,
-        "entry_time": 1770264175
+        "entry_time": 1770350632
       },
       {
-        "symbol": "SYNUSDT",
-        "entry_price": 0.08009,
-        "margin": 193.72119633986628,
-        "amount": 7256.381433632149,
+        "symbol": "ZAMAUSDT",
+        "entry_price": 0.0292,
+        "margin": 144.14070134044778,
+        "amount": 14808.976165114498,
         "leverage": 3.0,
-        "entry_time": 1770264175
-      },
-      {
-        "symbol": "GPSUSDT",
-        "entry_price": 0.008839,
-        "margin": 193.72119633986628,
-        "amount": 65749.92522000213,
-        "leverage": 3.0,
-        "entry_time": 1770264175
+        "entry_time": 1770350632
       }
     ],
-    "last_trade_date": "2026-02-05",
-    "total_invested": 1000.0,
+    "last_trade_date": "2026-02-06",
+    "total_invested": 0.0,
     "liquidation_count": 0
   },
   "5": {
