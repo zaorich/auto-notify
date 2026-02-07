@@ -902,8 +902,89 @@
   },
   "13": {
     "balance": 1196.3301627068345,
-    "positions": [],
-    "last_trade_date": "2026-02-06",
+    "positions": [
+      {
+        "symbol": "LAUSDT",
+        "entry_price": 0.2883,
+        "margin": 119.63301627068344,
+        "amount": 1244.8805022963936,
+        "leverage": 3.0,
+        "entry_time": 1770471239
+      },
+      {
+        "symbol": "TRADOORUSDT",
+        "entry_price": 1.269,
+        "margin": 119.63301627068344,
+        "amount": 282.8203694342398,
+        "leverage": 3.0,
+        "entry_time": 1770471239
+      },
+      {
+        "symbol": "PTBUSDT",
+        "entry_price": 0.001581,
+        "margin": 119.63301627068344,
+        "amount": 227007.62100698944,
+        "leverage": 3.0,
+        "entry_time": 1770471239
+      },
+      {
+        "symbol": "BANANAS31USDT",
+        "entry_price": 0.003729,
+        "margin": 119.63301627068344,
+        "amount": 96245.38718478152,
+        "leverage": 3.0,
+        "entry_time": 1770471239
+      },
+      {
+        "symbol": "TAGUSDT",
+        "entry_price": 0.0003255,
+        "margin": 119.63301627068344,
+        "amount": 1102608.4448910914,
+        "leverage": 3.0,
+        "entry_time": 1770471239
+      },
+      {
+        "symbol": "INUSDT",
+        "entry_price": 0.05834,
+        "margin": 119.63301627068344,
+        "amount": 6151.852053686155,
+        "leverage": 3.0,
+        "entry_time": 1770471239
+      },
+      {
+        "symbol": "API3USDT",
+        "entry_price": 0.3461,
+        "margin": 119.63301627068344,
+        "amount": 1036.9807824676402,
+        "leverage": 3.0,
+        "entry_time": 1770471239
+      },
+      {
+        "symbol": "CVCUSDT",
+        "entry_price": 0.03522,
+        "margin": 119.63301627068344,
+        "amount": 10190.205815220053,
+        "leverage": 3.0,
+        "entry_time": 1770471239
+      },
+      {
+        "symbol": "VELVETUSDT",
+        "entry_price": 0.12107,
+        "margin": 119.63301627068344,
+        "amount": 2964.3929033786267,
+        "leverage": 3.0,
+        "entry_time": 1770471239
+      },
+      {
+        "symbol": "BEATUSDT",
+        "entry_price": 0.1896,
+        "margin": 119.63301627068344,
+        "amount": 1892.9274726373962,
+        "leverage": 3.0,
+        "entry_time": 1770471239
+      }
+    ],
+    "last_trade_date": "2026-02-07",
     "total_invested": 2000.0,
     "liquidation_count": 0
   },
