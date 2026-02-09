@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 PROXY_ADDR = "127.0.0.1:10808"
 STATE_FILE = "strategy_state.json"
 HISTORY_FILE = "strategy_history.csv"
+SNAPSHOT_FILE = "positions_snapshot.csv"  # [新增] 快照记录文件
 EQUITY_FILE = "equity_curve.csv"
 
 # --- [新功能开关] ---
@@ -59,7 +60,6 @@ def get_market_rank(opener):
     
     for item in data:
         symbol = item['symbol']
-        # 过滤掉数据过旧的
         if current_ts - int(item['closeTime']) > 10 * 60 * 1000:
             continue
         price = float(item['lastPrice'])
@@ -131,7 +131,6 @@ def log_to_csv(record_type, strategy_id, symbol, price, high_price, amount, pos_
     change_pct_val = float(change_pct)
     
     # === [关键过滤逻辑] ===
-    # 增加 ROUND_RES 到白名单
     CRITICAL_EVENTS = ["OPEN", "CLOSE", "LIQUIDATION", "REPLENISH", "WITHDRAW", "ROUND_RES"]
     
     if record_type not in CRITICAL_EVENTS:
@@ -141,7 +140,6 @@ def log_to_csv(record_type, strategy_id, symbol, price, high_price, amount, pos_
     if record_type == "OPEN":
         change_str = f"涨:{change_pct_val:>+5.1f}%"
     
-    # 控制台打印
     print(f"📝 [CSV] {record_type:<10} S{strategy_id:<2} {symbol:<8} 净:{equity_val:.0f} 投:{invested_val:.0f} 押:{used_margin_val:.0f} 轮:{round_pnl_val:+.0f} {change_str} | {note}")
 
     try:
@@ -153,6 +151,48 @@ def log_to_csv(record_type, strategy_id, symbol, price, high_price, amount, pos_
             writer.writerow([current_time, strategy_id, record_type, symbol, price, high_price, amount, pos_pnl, equity_val, invested_val, used_margin_val, round_pnl_val, change_pct_val, note])
     except Exception as e:
         print(f"❌ 写入历史CSV失败: {e}")
+
+# ==========================================
+#               [新增] 全仓快照函数
+# ==========================================
+def record_positions_snapshot(data, market_map):
+    """
+    记录当前所有策略持仓的快照，用于深度复盘。
+    记录字段：时间, 策略ID, 币种, 开仓价, 现价, 历史最高, 历史最低, 数量, 浮动盈亏
+    """
+    file_exists = os.path.isfile(SNAPSHOT_FILE)
+    current_time = time.strftime('%Y-%m-%d %H:%M:%S')
+    
+    try:
+        with open(SNAPSHOT_FILE, 'a', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            # 如果文件不存在，写入表头
+            if not file_exists:
+                writer.writerow(["Time", "Strategy_ID", "Symbol", "Entry_Price", "Current_Price", "Max_Price", "Min_Price", "Amount", "Unrealized_PnL"])
+            
+            # 遍历所有策略
+            for s_id, strat in data.items():
+                if not strat.get('positions'): continue
+                
+                for pos in strat['positions']:
+                    symbol = pos['symbol']
+                    entry = float(pos['entry_price'])
+                    amount = float(pos['amount'])
+                    
+                    # 获取当前数据
+                    curr = float(market_map.get(symbol, entry))
+                    # 获取历史极值 (如果没有则默认当前价/开仓价)
+                    max_p = float(pos.get('max_price', entry))
+                    min_p = float(pos.get('min_price', entry))
+                    
+                    # 做空盈亏: (开仓 - 现价) * 数量
+                    pnl = (entry - curr) * amount
+                    
+                    writer.writerow([current_time, s_id, symbol, entry, curr, max_p, min_p, amount, pnl])
+        
+        print(f"📸 [快照] 已记录全网持仓价格信息至 {SNAPSHOT_FILE}")
+    except Exception as e:
+        print(f"❌ 写入快照失败: {e}")
 
 def record_equity_snapshot(data, market_map):
     file_exists = os.path.isfile(EQUITY_FILE)
@@ -211,7 +251,6 @@ def save_state(data):
 def update_price_stats(data, market_map):
     """
     更新所有持仓的最高价/最低价统计
-    在每次运行时调用，以追踪持仓期间的极值
     """
     for s_id, strategy in data.items():
         if not strategy.get('positions'):
@@ -287,7 +326,6 @@ def execute_single_strategy(s_id, strategy, opener, market_map, top_10, current_
     if wallet_balance > 0 and strategy['positions']:
         used_margin = sum([p.get('margin', 0) for p in strategy['positions']])
         
-        # 计算持仓时长
         duration_hours = 0.0
         if strategy['positions']:
             entry_time = strategy['positions'][0].get('entry_time', 0)
@@ -305,7 +343,7 @@ def execute_single_strategy(s_id, strategy, opener, market_map, top_10, current_
             entry = float(pos['entry_price'])
             amount = float(pos['amount'])
             
-            # 获取价格信息
+            # 价格信息
             exit_price = market_map.get(symbol, entry)
             # 获取记录的最高/最低价
             max_p = pos.get('max_price', entry)
@@ -319,13 +357,13 @@ def execute_single_strategy(s_id, strategy, opener, market_map, top_10, current_
             total_close_pnl += pnl
             temp_equity = wallet_balance + total_close_pnl
             
-            # 在备注中增加价格详情，方便复盘
+            # 在备注中增加价格详情
             price_note = f"Max:{max_p:.4g} Min:{min_p:.4g}"
             full_note = f"{close_note_base} | {price_note}"
             
             log_to_csv("CLOSE", s_id, symbol, exit_price, exit_price, amount, pnl, temp_equity, invested, used_margin, pnl, 0.0, full_note)
 
-        # --- [新增] 记录本轮汇总 (Round Result) ---
+        # 记录本轮汇总
         roi_pct = 0.0
         if used_margin > 0:
             roi_pct = (total_close_pnl / used_margin) * 100
@@ -333,8 +371,7 @@ def execute_single_strategy(s_id, strategy, opener, market_map, top_10, current_
         summary_note = f"本轮结算: 利润{total_close_pnl:+.1f}U, ROI:{roi_pct:+.1f}%, 持仓{duration_hours:.1f}h"
         
         log_to_csv("ROUND_RES", s_id, "ALL", 0, 0, 0, total_close_pnl, wallet_balance + total_close_pnl, invested, used_margin, total_close_pnl, 0.0, summary_note)
-        # ---------------------------------------
-
+        
         strategy['balance'] += total_close_pnl
         strategy['positions'] = []
     
@@ -600,6 +637,10 @@ if __name__ == "__main__":
         
         # 3. 记录净值
         record_equity_snapshot(data, market_map)
+        
+        # 4. [关键功能] 只要有策略操作，就记录全网持仓快照
+        if rotated_ids or closed_only_info or liquidated_ids:
+            record_positions_snapshot(data, market_map)
         
         save_state(data)
         
