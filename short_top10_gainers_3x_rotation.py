@@ -59,6 +59,7 @@ def get_market_rank(opener):
     
     for item in data:
         symbol = item['symbol']
+        # 过滤掉数据过旧的
         if current_ts - int(item['closeTime']) > 10 * 60 * 1000:
             continue
         price = float(item['lastPrice'])
@@ -207,6 +208,28 @@ def save_state(data):
     with open(STATE_FILE, 'w') as f:
         json.dump(data, f, indent=2)
 
+def update_price_stats(data, market_map):
+    """
+    更新所有持仓的最高价/最低价统计
+    在每次运行时调用，以追踪持仓期间的极值
+    """
+    for s_id, strategy in data.items():
+        if not strategy.get('positions'):
+            continue
+            
+        for pos in strategy['positions']:
+            symbol = pos['symbol']
+            if symbol in market_map:
+                curr_price = float(market_map[symbol])
+                
+                # 初始化 (兼容旧状态)
+                if 'max_price' not in pos: pos['max_price'] = float(pos['entry_price'])
+                if 'min_price' not in pos: pos['min_price'] = float(pos['entry_price'])
+                
+                # 更新极值
+                if curr_price > pos['max_price']: pos['max_price'] = curr_price
+                if curr_price < pos['min_price']: pos['min_price'] = curr_price
+
 # ==========================================
 #               核心逻辑函数
 # ==========================================
@@ -264,29 +287,43 @@ def execute_single_strategy(s_id, strategy, opener, market_map, top_10, current_
     if wallet_balance > 0 and strategy['positions']:
         used_margin = sum([p.get('margin', 0) for p in strategy['positions']])
         
-        # 计算持仓时长（取第一个仓位的时间）
+        # 计算持仓时长
         duration_hours = 0.0
         if strategy['positions']:
             entry_time = strategy['positions'][0].get('entry_time', 0)
             if entry_time > 0:
                 duration_hours = (current_ts - entry_time) / 3600.0
 
-        close_note = "轮动平仓"
+        close_note_base = "轮动平仓"
         if is_late_close_only:
-            close_note = f"延迟{delay_str}平仓"
+            close_note_base = f"延迟{delay_str}平仓"
         elif delay_str != "0.0h":
-            close_note = f"轮动平仓(延{delay_str})"
+            close_note_base = f"轮动平仓(延{delay_str})"
             
         for pos in strategy['positions']:
             symbol = pos['symbol']
             entry = float(pos['entry_price'])
             amount = float(pos['amount'])
+            
+            # 获取价格信息
             exit_price = market_map.get(symbol, entry)
+            # 获取记录的最高/最低价
+            max_p = pos.get('max_price', entry)
+            min_p = pos.get('min_price', entry)
+            
+            # 确保包含平仓时的价格
+            if exit_price > max_p: max_p = exit_price
+            if exit_price < min_p: min_p = exit_price
+            
             pnl = (entry - exit_price) * amount
             total_close_pnl += pnl
             temp_equity = wallet_balance + total_close_pnl
             
-            log_to_csv("CLOSE", s_id, symbol, exit_price, exit_price, amount, pnl, temp_equity, invested, used_margin, pnl, 0.0, close_note)
+            # 在备注中增加价格详情，方便复盘
+            price_note = f"Max:{max_p:.4g} Min:{min_p:.4g}"
+            full_note = f"{close_note_base} | {price_note}"
+            
+            log_to_csv("CLOSE", s_id, symbol, exit_price, exit_price, amount, pnl, temp_equity, invested, used_margin, pnl, 0.0, full_note)
 
         # --- [新增] 记录本轮汇总 (Round Result) ---
         roi_pct = 0.0
@@ -295,7 +332,6 @@ def execute_single_strategy(s_id, strategy, opener, market_map, top_10, current_
         
         summary_note = f"本轮结算: 利润{total_close_pnl:+.1f}U, ROI:{roi_pct:+.1f}%, 持仓{duration_hours:.1f}h"
         
-        # 记录汇总行 (Type=ALL 表示不针对特定币种)
         log_to_csv("ROUND_RES", s_id, "ALL", 0, 0, 0, total_close_pnl, wallet_balance + total_close_pnl, invested, used_margin, total_close_pnl, 0.0, summary_note)
         # ---------------------------------------
 
@@ -353,7 +389,10 @@ def execute_single_strategy(s_id, strategy, opener, market_map, top_10, current_
                 "margin": margin_per_coin,
                 "amount": amount,
                 "leverage": LEVERAGE,
-                "entry_time": entry_ts
+                "entry_time": entry_ts,
+                # 初始化最大最小值
+                "max_price": price, 
+                "min_price": price
             })
             log_to_csv("OPEN", s_id, symbol, price, price, amount, 0, current_equity, strategy['total_invested'], total_used_margin, 0, change_pct, "开空")
             
@@ -549,6 +588,9 @@ if __name__ == "__main__":
     
     if market_map:
         data = load_state()
+        
+        # 0. 更新所有持仓的价格统计 (Max/Min)
+        update_price_stats(data, market_map)
         
         # 1. 风控 (仅输出 summary，除非爆仓)
         liquidated_ids = check_risk_management(opener, data, market_map)
