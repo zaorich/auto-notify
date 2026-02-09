@@ -2,14 +2,95 @@
   "0": {
     "balance": 1000.0,
     "positions": [],
-    "last_trade_date": "2026-02-08",
+    "last_trade_date": "2026-02-09",
     "total_invested": 1000.0,
     "liquidation_count": 0
   },
   "1": {
     "balance": 1238.9592413310957,
-    "positions": [],
-    "last_trade_date": "2026-02-08",
+    "positions": [
+      {
+        "symbol": "PIPPINUSDT",
+        "entry_price": 0.26587,
+        "margin": 123.89592413310956,
+        "amount": 1398.005688491852,
+        "leverage": 3.0,
+        "entry_time": 1770602000
+      },
+      {
+        "symbol": "DUSKUSDT",
+        "entry_price": 0.11691,
+        "margin": 123.89592413310956,
+        "amount": 3179.2641553274198,
+        "leverage": 3.0,
+        "entry_time": 1770602000
+      },
+      {
+        "symbol": "YALAUSDT",
+        "entry_price": 0.00855,
+        "margin": 123.89592413310956,
+        "amount": 43472.254081792824,
+        "leverage": 3.0,
+        "entry_time": 1770602000
+      },
+      {
+        "symbol": "RVVUSDT",
+        "entry_price": 0.001712,
+        "margin": 123.89592413310956,
+        "amount": 217107.34369119664,
+        "leverage": 3.0,
+        "entry_time": 1770602000
+      },
+      {
+        "symbol": "CLANKERUSDT",
+        "entry_price": 33.77,
+        "margin": 123.89592413310956,
+        "amount": 11.006448694087315,
+        "leverage": 3.0,
+        "entry_time": 1770602000
+      },
+      {
+        "symbol": "KITEUSDT",
+        "entry_price": 0.16753,
+        "margin": 123.89592413310956,
+        "amount": 2218.634109707686,
+        "leverage": 3.0,
+        "entry_time": 1770602000
+      },
+      {
+        "symbol": "HUSDT",
+        "entry_price": 0.14043,
+        "margin": 123.89592413310956,
+        "amount": 2646.783254285613,
+        "leverage": 3.0,
+        "entry_time": 1770602000
+      },
+      {
+        "symbol": "ZILUSDT",
+        "entry_price": 0.00462,
+        "margin": 123.89592413310956,
+        "amount": 80451.89878773347,
+        "leverage": 3.0,
+        "entry_time": 1770602000
+      },
+      {
+        "symbol": "STABLEUSDT",
+        "entry_price": 0.018821,
+        "margin": 123.89592413310956,
+        "amount": 19748.566622354214,
+        "leverage": 3.0,
+        "entry_time": 1770602000
+      },
+      {
+        "symbol": "BUSDT",
+        "entry_price": 0.1548,
+        "margin": 123.89592413310956,
+        "amount": 2401.083801029255,
+        "leverage": 3.0,
+        "entry_time": 1770602000
+      }
+    ],
+    "last_trade_date": "2026-02-09",
     "total_invested": 1000.0,
     "liquidation_count": 0
   },
