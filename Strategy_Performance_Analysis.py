@@ -54,7 +54,7 @@ def calculate_max_drawdown(equity_series):
 def get_open_time_str(s_id_int):
     # 返回简短的时间格式，如 "06点"
     hour = (8 + s_id_int) % 24
-    return f"{hour:02d}点"
+    return f"{hour:02d}h"
 
 def analyze_market_mechanics(history_df):
     """
@@ -79,8 +79,7 @@ def analyze_market_mechanics(history_df):
     # 筛选窗口内的数据
     recent_df = df[df['Time'] > yesterday].copy()
     review_md = ""
-    coin_data = []
-
+    
     if not recent_df.empty:
         # 确保按时间排序，这对 first()/last() 逻辑至关重要
         recent_df = recent_df.sort_values(['Symbol', 'Time'])
@@ -99,38 +98,45 @@ def analyze_market_mechanics(history_df):
         curr_rows = g.last()
         
         # 3. 向量化计算涨跌幅
-        # 注意：索引必须对齐 (Symbol)
         pump_pct = (max_rows['Price'] - t0_prices) / t0_prices * 100
         curr_pct = (curr_rows['Price'] - t0_prices) / t0_prices * 100
         
         # 4. 计算延迟 (小时)
         delay_hours = (max_rows['Time'] - t0_times).dt.total_seconds() / 3600
         
-        # 5. 汇总数据到 DataFrame 用于生成报告
+        # 5. 汇总数据到 DataFrame
         stats = pd.DataFrame({
             'sym': t0.index.str.replace('USDT', ''),
             'time_str': t0['Time_CN'].dt.strftime("%H:%M"),
             'pump': pump_pct,
-            'delay': delay_hours.fillna(0).astype(int), # fillna防止极少数异常
+            'delay': delay_hours.fillna(0).astype(int),
             'curr': curr_pct
         })
         
-        # 排序并生成 Markdown
+        # 排序
         stats = stats.sort_values('pump', ascending=False)
         
+        # --- 生成 Markdown (移动端优化版) ---
         if not stats.empty:
-            review_md = "| 币种(上榜) | 最高涨 | 现价 |\n| :-- | :--: | :--: |\n"
+            # 3列布局：币种(时间) | 最高涨幅(耗时) | 现价走势
+            review_md = "| 📌币种 | 🚀最高(耗时) | 📉现价 |\n| :-- | :-- | :--: |\n"
             for _, row in stats.iterrows():
-                coin_str = f"{row['sym']}<br>{row['time_str']}"
-                pump_str = f"{row['pump']:+.0f}%({row['delay']}h)"
-                if row['pump'] > 10: pump_str = f"🔥{pump_str}"
-                curr_str = f"{row['curr']:+.0f}%"
+                # 1. 币种格式：加粗币种，时间变小
+                coin_str = f"**{row['sym']}** ({row['time_str']})"
+                
+                # 2. 最高涨幅：高亮 > 10%
+                pump_icon = "🚀" if row['pump'] > 10 else "📈"
+                pump_str = f"{pump_icon} +{row['pump']:.0f}% `@{row['delay']}h`"
+                
+                # 3. 现价：根据正负显示不同 Emoji
+                curr_icon = "🔴" if row['curr'] < 0 else "🟢"
+                curr_str = f"{curr_icon} {row['curr']:+.0f}%"
                 
                 review_md += f"| {coin_str} | {pump_str} | {curr_str} |\n"
         else:
-             review_md = "无新币数据"
+             review_md = "😴 过去24h无新币上线"
     else:
-        review_md = "过去24h无新币"
+        review_md = "😴 过去24h无新币上线"
 
     # ==========================================
     # 模块二：最佳做空时机 (Vectorized)
@@ -172,22 +178,34 @@ def analyze_market_mechanics(history_df):
         summary = analysis_df.groupby('delay')['chg'].agg(['mean', 'count']).reset_index()
         summary = summary[summary['count'] >= 3]
         
+        # --- 生成 Markdown (移动端优化版) ---
         if not summary.empty:
-            best_time_md = "| 延迟 | 均涨跌 | 建议 |\n| :--: | :--: | :--: |\n"
+            # 3列布局：时间节点 | 预期波动 | 信号
+            best_time_md = "| ⏰节点 | 📊平均波动 | 🚦信号 |\n| :--: | :--: | :--: |\n"
             for _, row in summary.iterrows():
                 h = int(row['delay'])
                 avg = row['mean']
                 
-                s = "👀"
-                if avg > 8: s = "⛔️"
-                elif avg > 3: s = "🚀"
-                elif avg < -1: s = "✅"
+                # 信号系统优化
+                if avg > 8: 
+                    sig = "⛔ 勿空" 
+                elif avg > 3: 
+                    sig = "⚠️ 观望"
+                elif avg < -2: 
+                    sig = "💰 **做空**"
+                elif avg < -0.5:
+                    sig = "✅ 尝试"
+                else:
+                    sig = "⚪ 震荡"
                 
-                best_time_md += f"| +{h}h | {avg:+.1f}% | {s} |\n"
+                # 波动格式化
+                avg_str = f"{avg:+.1f}%"
+                
+                best_time_md += f"| T+{h}h | {avg_str} | {sig} |\n"
         else:
-            best_time_md = "数据积累中..."
+            best_time_md = "⏳ 数据积累中..."
     else:
-        best_time_md = "数据积累中..."
+        best_time_md = "⏳ 数据积累中..."
 
     return review_md, best_time_md
 
@@ -253,29 +271,53 @@ def analyze_strategies():
         col = f"S_{i}"
         if col in equity_df.columns: max_dd = calculate_max_drawdown(equity_df[col])
         
-        # 格式化 ID: S22(06点)
+        # 格式化 ID
         id_str = f"S{s_id}<br>{get_open_time_str(i)}"
         
         stats_list.append({
             "id": id_str,
             "pnl": pnl,
             "win": win_rate,
-            "dd": max_dd
+            "dd": max_dd,
+            "count": total  # ✅ 新增：保存总场次
         })
 
     stats_list.sort(key=lambda x: x['pnl'], reverse=True)
     
     # 3. 生成排行榜 (强制 3 列布局)
-    # 策略(时) | 盈(撤) | 胜率
-    rank_md = "| 策略(时) | 盈(撤) | 胜率 |\n| :-- | :--: | :--: |\n"
+    # 第一列：策略 (时间)
+    # 第二列：盈亏 (场次) -> 核心业绩与样本量
+    # 第三列：胜率 / 回撤 -> 风险与稳定性
     
-    for s in stats_list:
-        # 合并 盈亏和回撤：+734(0%)
-        pnl_dd_str = f"{s['pnl']:.0f}({s['dd']:.0f}%)"
-        # 胜率：100%
-        win_str = f"{s['win']}%"
+    rank_md = "| 🤖策略 | 💰盈(次) | 🛡️胜/撤 |\n| :-- | :--: | :--: |\n"
+    
+    top_n = stats_list[:10] # 只取前10
+    
+    for i, s in enumerate(top_n):
+        # 1. 策略列
+        parts = s['id'].split('<br>')
+        strat_id = parts[0]
+        # 06h
+        open_time = parts[1] 
         
-        rank_md += f"| {s['id']} | {pnl_dd_str} | {win_str} |\n"
+        rank_icon = ""
+        if i == 0: rank_icon = "🥇"
+        elif i == 1: rank_icon = "🥈"
+        elif i == 2: rank_icon = "🥉"
+        
+        col_name = f"{rank_icon} **{strat_id}** `{open_time}`"
+        
+        # 2. 盈亏(次)列
+        # 格式：**+1240** (58)
+        pnl_val = s['pnl']
+        count_val = s['count']
+        pnl_str = f"**{pnl_val:+.0f}** ({count_val})"
+        
+        # 3. 胜/撤列
+        # 格式：85% / 2%
+        win_dd_str = f"{s['win']}% / {s['dd']:.0f}%"
+        
+        rank_md += f"| {col_name} | {pnl_str} | {win_dd_str} |\n"
 
     # 4. 发送
     current_time = datetime.now().strftime("%m-%d %H:%M")
