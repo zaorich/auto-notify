@@ -81,19 +81,17 @@ def analyze_market_mechanics(history_df):
     review_md = ""
     
     if not recent_df.empty:
-        # 确保按时间排序，这对 first()/last() 逻辑至关重要
+        # 确保按时间排序
         recent_df = recent_df.sort_values(['Symbol', 'Time'])
         g = recent_df.groupby('Symbol')
         
-        # 1. 获取基准点 (t0)：窗口内的第一笔交易
+        # 1. 获取基准点 (t0)
         t0 = g.first()
         t0_prices = t0['Price']
         t0_times = t0['Time']
         
         # 2. 获取统计点：最高价(High) 和 现价(Current)
-        # idxmax() 找到最高价的索引，然后 .loc 取出完整行(包含时间)
         idx_max = g['Price'].idxmax()
-        # 注意：这里需要重新通过索引定位回原表以获取对应的时间
         max_rows = recent_df.loc[idx_max].set_index('Symbol')
         curr_rows = g.last()
         
@@ -116,96 +114,81 @@ def analyze_market_mechanics(history_df):
         # 排序
         stats = stats.sort_values('pump', ascending=False)
         
-        # --- 生成 Markdown (移动端优化版) ---
+        # --- 生成 Markdown (纯文字版) ---
         if not stats.empty:
-            # 3列布局：币种(时间) | 最高涨幅(耗时) | 现价走势
-            review_md = "| 📌币种 | 🚀最高(耗时) | 📉现价 |\n| :-- | :-- | :--: |\n"
+            # 3列布局：币种(时间) | 最高(耗时) | 现价
+            review_md = "| 币种 | 最高(耗时) | 现价 |\n| :-- | :-- | :--: |\n"
             for _, row in stats.iterrows():
                 # 1. 币种格式：加粗币种，时间变小
                 coin_str = f"**{row['sym']}** ({row['time_str']})"
                 
-                # 2. 最高涨幅：高亮 > 10%
-                pump_icon = "🚀" if row['pump'] > 10 else "📈"
-                pump_str = f"{pump_icon} +{row['pump']:.0f}% `@{row['delay']}h`"
+                # 2. 最高涨幅：移除图标，保留数值
+                pump_str = f"+{row['pump']:.0f}% `@{row['delay']}h`"
                 
-                # 3. 现价：根据正负显示不同 Emoji
-                curr_icon = "🔴" if row['curr'] < 0 else "🟢"
-                curr_str = f"{curr_icon} {row['curr']:+.0f}%"
+                # 3. 现价：移除图标，保留数值
+                curr_str = f"{row['curr']:+.0f}%"
                 
                 review_md += f"| {coin_str} | {pump_str} | {curr_str} |\n"
         else:
-             review_md = "😴 过去24h无新币上线"
+             review_md = "无新币上线"
     else:
-        review_md = "😴 过去24h无新币上线"
+        review_md = "无新币上线"
 
     # ==========================================
     # 模块二：最佳做空时机 (Vectorized)
     # ==========================================
-    # 目标：计算同一天、同一币种下，后续K线相对于首根K线的涨跌幅
     
     df['Date'] = df['Time'].dt.date
-    # 全局排序，保证 groupby 后组内时间有序
     df = df.sort_values(['Symbol', 'Date', 'Time'])
     
     g_short = df.groupby(['Symbol', 'Date'])
     
-    # 使用 transform('first') 将每组的第一行数据(基准点)广播到全组，避免循环
     t0_prices = g_short['Price'].transform('first')
     t0_times = g_short['Time'].transform('first')
     
-    # 向量化计算全表所有行的 diff 和 chg
     delays = (df['Time'] - t0_times).dt.total_seconds() / 3600.0
     changes = (df['Price'] - t0_prices) / t0_prices * 100.0
     
-    # 标记每行在组内的序号
-    # cumcount() 会给每组的第一行标记 0，第二行标记 1...
     row_indices = g_short.cumcount()
-    
-    # 筛选非首行数据 (即 row_indices > 0 的行，排除 delay=0 的基准点)
     valid_mask = row_indices > 0
     
     best_time_md = ""
-    # 只有当存在有效数据时才进行聚合
     if valid_mask.any():
-        # 构建中间表进行聚合
         analysis_df = pd.DataFrame({
             'delay': delays[valid_mask].round().astype(int),
             'chg': changes[valid_mask]
         })
         
-        # 聚合：按延迟时间统计均值
-        # 筛选至少有3个样本的数据点，保证统计意义
         summary = analysis_df.groupby('delay')['chg'].agg(['mean', 'count']).reset_index()
         summary = summary[summary['count'] >= 3]
         
-        # --- 生成 Markdown (移动端优化版) ---
+        # --- 生成 Markdown (纯文字版) ---
         if not summary.empty:
-            # 3列布局：时间节点 | 预期波动 | 信号
-            best_time_md = "| ⏰节点 | 📊平均波动 | 🚦信号 |\n| :--: | :--: | :--: |\n"
+            # 3列布局：节点 | 波动 | 建议
+            best_time_md = "| 节点 | 平均波动 | 建议 |\n| :--: | :--: | :--: |\n"
             for _, row in summary.iterrows():
                 h = int(row['delay'])
                 avg = row['mean']
                 
-                # 信号系统优化
+                # 信号系统优化 (纯文字)
                 if avg > 8: 
-                    sig = "⛔ 勿空" 
+                    sig = "勿空" 
                 elif avg > 3: 
-                    sig = "⚠️ 观望"
+                    sig = "观望"
                 elif avg < -2: 
-                    sig = "💰 **做空**"
+                    sig = "**做空**"
                 elif avg < -0.5:
-                    sig = "✅ 尝试"
+                    sig = "尝试"
                 else:
-                    sig = "⚪ 震荡"
+                    sig = "震荡"
                 
-                # 波动格式化
                 avg_str = f"{avg:+.1f}%"
                 
                 best_time_md += f"| T+{h}h | {avg_str} | {sig} |\n"
         else:
-            best_time_md = "⏳ 数据积累中..."
+            best_time_md = "数据积累中..."
     else:
-        best_time_md = "⏳ 数据积累中..."
+        best_time_md = "数据积累中..."
 
     return review_md, best_time_md
 
@@ -229,7 +212,7 @@ def analyze_strategies():
     history_df['Strategy_ID'] = pd.to_numeric(history_df['Strategy_ID'], errors='coerce')
     history_df['Round_PnL'] = pd.to_numeric(history_df['Round_PnL'], errors='coerce').fillna(0)
 
-    # 1. 市场分析 (调用优化后的函数)
+    # 1. 市场分析 (调用纯文字版函数)
     review_md, best_time_md = analyze_market_mechanics(history_df)
 
     # 2. 策略排行
@@ -263,15 +246,12 @@ def analyze_strategies():
                 s = pd.to_numeric(equity_df[col], errors='coerce').dropna()
                 if len(s)>0: pnl = s.iloc[-1] - 1000
 
-        # 胜率
         win_rate = int(wins/total*100) if total > 0 else 0
         
-        # 回撤
         max_dd = 0.0
         col = f"S_{i}"
         if col in equity_df.columns: max_dd = calculate_max_drawdown(equity_df[col])
         
-        # 格式化 ID
         id_str = f"S{s_id}<br>{get_open_time_str(i)}"
         
         stats_list.append({
@@ -279,27 +259,22 @@ def analyze_strategies():
             "pnl": pnl,
             "win": win_rate,
             "dd": max_dd,
-            "count": total  # ✅ 新增：保存总场次
+            "count": total
         })
 
     stats_list.sort(key=lambda x: x['pnl'], reverse=True)
     
-    # 3. 生成排行榜 (强制 3 列布局)
-    # 第一列：策略 (时间)
-    # 第二列：盈亏 (场次) -> 核心业绩与样本量
-    # 第三列：胜率 / 回撤 -> 风险与稳定性
+    # 3. 生成排行榜 (保留奖牌，移除其他图标)
+    rank_md = "| 策略 | 盈(次) | 胜/撤 |\n| :-- | :--: | :--: |\n"
     
-    rank_md = "| 🤖策略 | 💰盈(次) | 🛡️胜/撤 |\n| :-- | :--: | :--: |\n"
-    
-    top_n = stats_list[:10] # 只取前10
+    top_n = stats_list[:10]
     
     for i, s in enumerate(top_n):
-        # 1. 策略列
         parts = s['id'].split('<br>')
         strat_id = parts[0]
-        # 06h
-        open_time = parts[1] 
+        open_time = parts[1]
         
+        # 奖牌保留，这属于排名标识
         rank_icon = ""
         if i == 0: rank_icon = "🥇"
         elif i == 1: rank_icon = "🥈"
@@ -307,14 +282,10 @@ def analyze_strategies():
         
         col_name = f"{rank_icon} **{strat_id}** `{open_time}`"
         
-        # 2. 盈亏(次)列
-        # 格式：**+1240** (58)
         pnl_val = s['pnl']
         count_val = s['count']
         pnl_str = f"**{pnl_val:+.0f}** ({count_val})"
         
-        # 3. 胜/撤列
-        # 格式：85% / 2%
         win_dd_str = f"{s['win']}% / {s['dd']:.0f}%"
         
         rank_md += f"| {col_name} | {pnl_str} | {win_dd_str} |\n"
@@ -327,13 +298,13 @@ def analyze_strategies():
     content = f"""
 **{current_time} (UTC+8)**
 
-### 🔥 昨日新币
+### 昨日新币
 {review_md}
 
-### ⏳ 做空时机
+### 做空时机
 {best_time_md}
 
-### 🏆 策略排行
+### 策略排行
 {rank_md}
     """
     
