@@ -12,23 +12,24 @@ from datetime import datetime, timedelta
 PROXY_ADDR = "127.0.0.1:10808"
 STATE_FILE = "strategy_state.json"
 HISTORY_FILE = "strategy_history.csv"
-SNAPSHOT_FILE = "positions_snapshot.csv"
 EQUITY_FILE = "equity_curve.csv"
 
-# --- [现有配置] ---
-ENABLE_COMPOUNDING = True
-ENABLE_ROI_PAYBACK = True
-INITIAL_UNIT = 1000.0     # 轮动策略本金
-POSITIONS_COUNT = 10
-LEVERAGE = 3.0
-MIN_ALIVE_BALANCE = 10.0
-MAX_DELAY_SECONDS = 3600
+# --- [新功能开关] ---
+ENABLE_COMPOUNDING = True  # 复利开关
+ENABLE_ROI_PAYBACK = True  # 回本提取开关
 
-# --- [新增：追涨策略配置] ---
-CHASE_STRAT_ID = "S_CHASE" # 追涨策略独立ID
-CHASE_MARGIN = 100.0       # 每次开仓保证金(U)
-CHASE_LEVERAGE = 3.0       # 追涨杠杆
-CHASE_HOLD_HOURS = 11      # 持仓时间(小时)
+# --- [资金参数: 轮动做空] ---
+INITIAL_UNIT = 1000.0     # S0-S23 标准开仓/复活金额
+POSITIONS_COUNT = 10      # 持仓数量
+LEVERAGE = 3.0            # 杠杆倍数
+MIN_ALIVE_BALANCE = 10.0  # “存活”阈值
+MAX_DELAY_SECONDS = 3600  # 最大延迟容忍时间(秒)
+
+# --- [新增资金参数: 追涨做多] ---
+CHASE_STRAT_ID = "S_CHASE"
+CHASE_MARGIN = 100.0      # 每次追涨固定保证金
+CHASE_LEVERAGE = 3.0      # 追涨杠杆
+CHASE_HOLD_HOURS = 11     # 追涨持仓时间
 
 HEADERS = {'User-Agent': 'Mozilla/5.0'}
 SERVERCHAN_KEY = os.environ.get("SERVERCHAN_KEY")
@@ -94,7 +95,8 @@ def calculate_strategy_equity(strategy, market_map, opener=None, use_high_price=
             symbol = pos['symbol']
             entry = float(pos['entry_price'])
             amount = float(pos['amount'])
-            is_long = pos.get('side', 'SHORT') == 'LONG' # 默认为空，兼容旧数据
+            # 兼容：如果没有 side 字段，默认为 SHORT (做空)
+            side = pos.get('side', 'SHORT')
             
             curr = market_map.get(symbol, entry)
             calc_price = curr
@@ -106,10 +108,11 @@ def calculate_strategy_equity(strategy, market_map, opener=None, use_high_price=
                     calc_price = max(curr, high_15m)
                     if high_15m > entry * 1.05: warn_msg = "⚠️"
 
-            if is_long:
-                pnl = (curr - entry) * amount # 做多盈亏
+            # 计算盈亏
+            if side == 'LONG':
+                pnl = (curr - entry) * amount
             else:
-                pnl = (entry - calc_price) * amount # 做空盈亏
+                pnl = (entry - calc_price) * amount
                 
             total_unrealized_pnl += pnl
             
@@ -121,23 +124,26 @@ def calculate_strategy_equity(strategy, market_map, opener=None, use_high_price=
                 'amount': amount,
                 'pnl': pnl,
                 'warn': warn_msg,
-                'side': 'LONG' if is_long else 'SHORT'
+                'side': side
             })
             
     equity = wallet_balance + total_unrealized_pnl
     return equity, details
 
 def log_to_csv(record_type, strategy_id, symbol, price, high_price, amount, pos_pnl, equity, total_invested, used_margin, round_pnl, change_pct=0.0, note=""):
+    """
+    日志记录函数
+    """
     file_exists = os.path.isfile(HISTORY_FILE)
     current_time = time.strftime('%Y-%m-%d %H:%M:%S')
     
-    # 格式化数值
     equity_val = float(equity)
     invested_val = float(total_invested)
     used_margin_val = float(used_margin)
     round_pnl_val = float(round_pnl)
     change_pct_val = float(change_pct)
     
+    # 允许新的记录类型
     CRITICAL_EVENTS = ["OPEN", "CLOSE", "OPEN_LONG", "CLOSE_LONG", "LIQUIDATION", "REPLENISH", "WITHDRAW", "ROUND_RES", "SNAPSHOT"]
     
     if record_type not in CRITICAL_EVENTS: return 
@@ -146,7 +152,7 @@ def log_to_csv(record_type, strategy_id, symbol, price, high_price, amount, pos_
     if "OPEN" in record_type: change_str = f"涨:{change_pct_val:>+5.1f}%"
     
     if record_type != "SNAPSHOT":
-        print(f"📝 [CSV] {record_type:<10} {strategy_id:<3} {symbol:<8} 净:{equity_val:.0f} 投:{invested_val:.0f} 轮:{round_pnl_val:+.0f} {change_str} | {note}")
+        print(f"📝 [CSV] {record_type:<10} {strategy_id:<7} {symbol:<8} 净:{equity_val:.0f} 投:{invested_val:.0f} 轮:{round_pnl_val:+.0f} {change_str} | {note}")
 
     try:
         with open(HISTORY_FILE, 'a', newline='', encoding='utf-8') as f:
@@ -159,7 +165,7 @@ def log_to_csv(record_type, strategy_id, symbol, price, high_price, amount, pos_
         print(f"❌ 写入历史CSV失败: {e}")
 
 # ==========================================
-#               记录与快照逻辑
+#               快照相关逻辑
 # ==========================================
 def record_aggregated_snapshot(data, market_map):
     print(f"📸 [快照] 正在聚合记录持仓币种价格...")
@@ -171,9 +177,8 @@ def record_aggregated_snapshot(data, market_map):
         for pos in strat['positions']:
             sym = pos['symbol']
             entry = float(pos['entry_price'])
-            side = pos.get('side', 'SHORT')
+            side = pos.get('side', 'SHORT') # 区分多空
             
-            # Key 区分多空: DOGE_SHORT / DOGE_LONG
             key = f"{sym}_{side}"
             
             if key not in agg_data:
@@ -183,11 +188,8 @@ def record_aggregated_snapshot(data, market_map):
             agg_data[key]['total_entry'] += entry
             agg_data[key]['s_ids'].append(str(s_id))
     
-    if not agg_data:
-        print("📸 [快照] 当前无持仓，跳过。")
-        return
+    if not agg_data: return
 
-    count = 0
     for key, info in agg_data.items():
         curr_price = float(market_map.get(info['sym'], 0))
         if curr_price == 0: continue
@@ -195,13 +197,9 @@ def record_aggregated_snapshot(data, market_map):
         avg_entry = info['total_entry'] / info['count']
         s_list = ",".join(info['s_ids'])
         
-        # 备注: 多空方向 | 持仓数 | 均价
         note_str = f"{info['side']} | Hold:{info['count']} | AvgEntry:{avg_entry:.4g} | S:{s_list}"
         
         log_to_csv("SNAPSHOT", "AGG", info['sym'], curr_price, 0, 0, 0, 0, 0, 0, 0, 0, note_str)
-        count += 1
-            
-    print(f"✅ [快照] 完成，共记录 {count} 条聚合持仓信息。")
 
 def record_equity_snapshot(data, market_map):
     file_exists = os.path.isfile(EQUITY_FILE)
@@ -210,23 +208,23 @@ def record_equity_snapshot(data, market_map):
     total_equity = 0.0
     total_invested_all = 0.0
     
-    # 记录 S0-S23 的净值
+    # 记录 S0-S23
     for i in range(24):
         s_id = str(i)
         strat = data[s_id]
-        eq, _ = calculate_strategy_equity(strat, market_map)
+        eq, _ = calculate_strategy_equity(strat, market_map, opener=None, use_high_price=False)
         if eq < 0: eq = 0
         row_data.append(round(eq, 2))
         total_equity += eq
         total_invested_all += strat.get('total_invested', INITIAL_UNIT)
-    
-    # 加上 S_CHASE 的净值到总计
+        
+    # 加入 S_CHASE 的资产
     if CHASE_STRAT_ID in data:
         chase_strat = data[CHASE_STRAT_ID]
         eq, _ = calculate_strategy_equity(chase_strat, market_map)
         total_equity += eq
         total_invested_all += chase_strat.get('total_invested', 0)
-        
+
     row_data.append(round(total_equity, 2))
     row_data.append(round(total_invested_all, 2))
     
@@ -243,7 +241,6 @@ def record_equity_snapshot(data, market_map):
 def load_state():
     if not os.path.exists(STATE_FILE):
         data = {}
-        # 初始化 S0-S23
         for i in range(24):
             data[str(i)] = {"balance": INITIAL_UNIT, "positions": [], "last_trade_date": "", "total_invested": INITIAL_UNIT, "liquidation_count": 0}
         return data
@@ -251,26 +248,24 @@ def load_state():
     with open(STATE_FILE, 'r') as f:
         data = json.load(f)
         
-    # 确保 S0-S23 字段完整
+    # 确保 S0-S23 结构完整
     for k, v in data.items():
         if k == CHASE_STRAT_ID: continue
         if "total_invested" not in v: v["total_invested"] = INITIAL_UNIT
         if "liquidation_count" not in v: v["liquidation_count"] = 0
     
-    # 初始化 S_CHASE (如果不存在)
+    # 确保 S_CHASE 存在
     if CHASE_STRAT_ID not in data:
         data[CHASE_STRAT_ID] = {
-            "balance": 1000.0, # 初始资金池
-            "positions": [],
-            "prev_top10": [],  # 记录上一次的Top10，用于判断新上榜
-            "total_invested": 1000.0,
+            "balance": 1000.0, 
+            "positions": [], 
+            "prev_top10": [], 
+            "total_invested": 1000.0, 
             "liquidation_count": 0
         }
-    else:
-        # 确保 prev_top10 字段存在
-        if "prev_top10" not in data[CHASE_STRAT_ID]:
-            data[CHASE_STRAT_ID]["prev_top10"] = []
-            
+    elif "prev_top10" not in data[CHASE_STRAT_ID]:
+        data[CHASE_STRAT_ID]["prev_top10"] = []
+        
     return data
 
 def save_state(data):
@@ -290,10 +285,9 @@ def update_price_stats(data, market_map):
                 if curr_price < pos['min_price']: pos['min_price'] = curr_price
 
 # ==========================================
-#               核心业务逻辑
+#               核心逻辑函数
 # ==========================================
 
-# --- 1. 风控检查 ---
 def check_risk_management(opener, data, market_map):
     print("\n🛡️ [监控] 开始全仓风控检查...")
     liquidated_ids = [] 
@@ -316,9 +310,8 @@ def check_risk_management(opener, data, market_map):
                 coin_str = f"{side_icon}{short_symbol}({d['pnl']:+.0f})"
                 coin_details_list.append(coin_str)
             pnl = equity - invested
-            print(f"   >> {s_id:<3} 净:{equity:>5.0f} ({pnl:>+5.0f}) 押:{used_margin:>4.0f} 轮:{round_pnl:>+5.0f} | {' '.join(coin_details_list)}")
+            print(f"   >> {s_id:<7} 净:{equity:>5.0f} ({pnl:>+5.0f}) 押:{used_margin:>4.0f} 轮:{round_pnl:>+5.0f} | {' '.join(coin_details_list)}")
         
-        # 爆仓判定 (简化：净值<=0即归零)
         if equity <= 0:
             print(f"💥 策略 {s_id} 触发全仓爆仓! 净值归零")
             liquidated_ids.append(s_id)
@@ -330,7 +323,7 @@ def check_risk_management(opener, data, market_map):
             
     return liquidated_ids
 
-# --- 2. 轮动策略执行 (做空) ---
+# --- 轮动策略逻辑 (S0-S23) ---
 def execute_single_strategy(s_id, strategy, opener, market_map, top_10, current_utc, target_date_str, is_late_close_only, delay_str):
     print(f"\n⚡ [轮动] 策略 {s_id} (延迟: {delay_str})")
     
@@ -339,7 +332,7 @@ def execute_single_strategy(s_id, strategy, opener, market_map, top_10, current_
     invested = strategy['total_invested']
     current_ts = int(time.time())
     
-    # 平仓逻辑
+    # 1. 平仓
     if wallet_balance > 0 and strategy['positions']:
         used_margin = sum([p.get('margin', 0) for p in strategy['positions']])
         duration_hours = 0.0
@@ -347,14 +340,15 @@ def execute_single_strategy(s_id, strategy, opener, market_map, top_10, current_
             entry_time = strategy['positions'][0].get('entry_time', 0)
             if entry_time > 0: duration_hours = (current_ts - entry_time) / 3600.0
 
-        close_note = f"轮动平仓(延{delay_str})" if delay_str != "0.0h" else "轮动平仓"
+        close_note_base = "轮动平仓"
+        if is_late_close_only: close_note_base = f"延迟{delay_str}平仓"
+        elif delay_str != "0.0h": close_note_base = f"轮动平仓(延{delay_str})"
             
         for pos in strategy['positions']:
             symbol = pos['symbol']
             entry, amount = float(pos['entry_price']), float(pos['amount'])
             exit_price = market_map.get(symbol, entry)
             max_p, min_p = pos.get('max_price', entry), pos.get('min_price', entry)
-            # 更新最终极值
             if exit_price > max_p: max_p = exit_price
             if exit_price < min_p: min_p = exit_price
             
@@ -362,7 +356,8 @@ def execute_single_strategy(s_id, strategy, opener, market_map, top_10, current_
             total_close_pnl += pnl
             temp_equity = wallet_balance + total_close_pnl
             
-            log_to_csv("CLOSE", s_id, symbol, exit_price, exit_price, amount, pnl, temp_equity, invested, used_margin, pnl, 0.0, f"{close_note} | Max:{max_p:.4g} Min:{min_p:.4g}")
+            note_str = f"{close_note_base} | Max:{max_p:.4g} Min:{min_p:.4g}"
+            log_to_csv("CLOSE", s_id, symbol, exit_price, exit_price, amount, pnl, temp_equity, invested, used_margin, pnl, 0.0, note_str)
 
         roi_pct = (total_close_pnl / used_margin * 100) if used_margin > 0 else 0
         summary_note = f"本轮结算: 利润{total_close_pnl:+.1f}U, ROI:{roi_pct:+.1f}%, 持仓{duration_hours:.1f}h"
@@ -377,7 +372,6 @@ def execute_single_strategy(s_id, strategy, opener, market_map, top_10, current_
         strategy['last_trade_date'] = target_date_str
         return "CLOSED_ONLY"
 
-    # 复活/回本逻辑
     if current_equity < MIN_ALIVE_BALANCE:
         print(f"💀 策略 {s_id} 已归零，复活...")
         strategy['balance'] = INITIAL_UNIT
@@ -391,7 +385,7 @@ def execute_single_strategy(s_id, strategy, opener, market_map, top_10, current_
         log_to_csv("WITHDRAW", s_id, "USDT", 0, 0, 0, 0, strategy['balance'], strategy['total_invested'], 0, 0, 0.0, "回本提取")
         current_equity = strategy['balance'] 
 
-    # 开新仓 (做空)
+    # 2. 开仓 (做空)
     trading_capital = current_equity
     if not ENABLE_COMPOUNDING and trading_capital > INITIAL_UNIT: trading_capital = INITIAL_UNIT
     
@@ -410,7 +404,7 @@ def execute_single_strategy(s_id, strategy, opener, market_map, top_10, current_
             new_positions.append({
                 "symbol": symbol, "entry_price": price, "margin": margin_per_coin, "amount": amount,
                 "leverage": LEVERAGE, "entry_time": entry_ts, "max_price": price, "min_price": price,
-                "side": "SHORT" # 标记方向
+                "side": "SHORT"
             })
             log_to_csv("OPEN", s_id, symbol, price, price, amount, 0, current_equity, strategy['total_invested'], total_used_margin, 0, change_pct, "开空")
         strategy['positions'] = new_positions
@@ -444,13 +438,10 @@ def scan_and_execute_strategies(opener, data, market_map, top_10):
             
     return rotated_ids, closed_only_info
 
-# --- 3. 追涨策略执行 (做多) ---
+# --- [新增] 追涨策略逻辑 ---
 def run_chase_strategy(data, market_map, top_10):
     """
-    逻辑：
-    1. 检查现有持仓，如果超过11小时则平仓。
-    2. 对比上一次Top10和本次Top10，找出新上榜的币。
-    3. 对新币开多 (100U * 3倍)。
+    逻辑：新上榜（不在上次列表里）就开多，持仓满11小时平仓。
     """
     strat = data[CHASE_STRAT_ID]
     prev_top10_symbols = set(strat.get("prev_top10", []))
@@ -461,10 +452,8 @@ def run_chase_strategy(data, market_map, top_10):
     
     print(f"\n🚀 [追涨] 检查 S_CHASE 策略...")
     
-    # 1. 检查平仓 (持仓 > 11小时)
+    # 1. 检查平仓 (持仓 > 11h)
     remaining_positions = []
-    positions_closed_pnl = 0.0
-    closed_margin = 0.0
     
     if strat['positions']:
         for pos in strat['positions']:
@@ -472,29 +461,20 @@ def run_chase_strategy(data, market_map, top_10):
             hold_time = (current_ts - entry_time) / 3600.0
             
             if hold_time >= CHASE_HOLD_HOURS:
-                # 触发平仓
                 symbol = pos['symbol']
                 entry = float(pos['entry_price'])
                 amount = float(pos['amount'])
                 exit_price = market_map.get(symbol, entry)
                 
-                # 做多盈亏: (平仓 - 开仓) * 数量
+                # 做多盈亏
                 pnl = (exit_price - entry) * amount
                 
+                # 记录最高价
                 max_p = pos.get('max_price', entry)
                 if exit_price > max_p: max_p = exit_price
                 
-                # 记录
-                positions_closed_pnl += pnl
-                closed_margin += pos.get('margin', 0)
-                strat['balance'] += pnl # 结算到余额 (这里只是模拟，实际上保证金释放回余额)
-                # 简单处理：余额 = 余额 + 利润 (本金部分在开仓时未扣除，仅计算占用，这里简化处理)
-                # 更严谨的逻辑：Balance -= Margin(Open), Balance += Margin + PnL(Close)
-                # 本脚本逻辑是：Equity = Balance + Unrealized. 
-                # 这里我们假设 Balance 是可用余额。开仓扣 Balance，平仓还 Balance。
-                
-                # 由于原脚本没严格扣除Balance，我们这里保持一致：Balance 视为净值基数
-                # PnL 直接加到 Balance
+                # 资金回笼 (模拟)
+                strat['balance'] += pnl
                 
                 note = f"追涨平仓({hold_time:.1f}h) | Max:{max_p:.4g}"
                 log_to_csv("CLOSE_LONG", CHASE_STRAT_ID, symbol, exit_price, exit_price, amount, pnl, 
@@ -506,44 +486,35 @@ def run_chase_strategy(data, market_map, top_10):
         strat['positions'] = remaining_positions
 
     # 2. 检查开仓 (新上榜)
-    # 新币 = 当前Top10 - 上次Top10
-    # 注意：首次运行时 prev_top10 可能为空，此时不应全开，应跳过
+    # 如果是首次运行（prev为空），为防止乱开单，直接更新列表并跳过
     if not prev_top10_symbols:
-        print("   >> 首次运行或无历史记录，初始化 Top10 列表，不执行开仓。")
+        print("   >> 首次运行或无历史，初始化 Top10 列表，跳过开仓。")
     else:
         new_coins = current_top10_symbols - prev_top10_symbols
         for symbol in new_coins:
-            # 找到该币的信息
             coin_info = next((x for x in top_10 if x['symbol'] == symbol), None)
             if not coin_info: continue
             
             price = coin_info['price']
             change_pct = coin_info.get('change', 0.0)
             
-            # 开仓参数
+            # 开仓
             margin = CHASE_MARGIN
             amount = (margin * CHASE_LEVERAGE) / price
             
             new_pos = {
-                "symbol": symbol,
-                "entry_price": price,
-                "margin": margin,
-                "amount": amount,
-                "leverage": CHASE_LEVERAGE,
-                "entry_time": current_ts,
-                "max_price": price,
-                "min_price": price,
-                "side": "LONG" # 标记为做多
+                "symbol": symbol, "entry_price": price, "margin": margin, "amount": amount,
+                "leverage": CHASE_LEVERAGE, "entry_time": current_ts,
+                "max_price": price, "min_price": price, "side": "LONG"
             }
             strat['positions'].append(new_pos)
             
-            # 记录
             log_to_csv("OPEN_LONG", CHASE_STRAT_ID, symbol, price, price, amount, 0, 
                        strat['balance'], strat['total_invested'], margin, 0, change_pct, "新上榜追涨")
             print(f"   >> 发现新币 {symbol}，开多！")
             acted = True
 
-    # 3. 更新状态
+    # 3. 更新对比列表
     strat['prev_top10'] = list(current_top10_symbols)
     return acted
 
@@ -555,13 +526,11 @@ def report_to_wechat(opener, data, market_map, rotated_ids, closed_only_info, li
     if not SERVERCHAN_KEY: return
     print("\n📤 正在生成报告...")
     
-    # 汇总 S0-S23 数据
     total_equity = 0
     total_invested = 0
+    md_table = "| ID | 投入 | 押金 | 净值 | 总盈 | 轮盈 | 爆 |\n| :--: | :--: | :--: | :--: | :--: | :--: | :--: |\n"
     
     # 轮动策略表格
-    md_table = "| ID | 投入 | 净值 | 盈亏 | 状态 |\n| :--: | :--: | :--: | :--: | :--: |\n"
-    
     for i in range(24):
         s_id = str(i)
         strat = data[s_id]
@@ -573,22 +542,20 @@ def report_to_wechat(opener, data, market_map, rotated_ids, closed_only_info, li
         total_invested += inv
         
         icon = "🔴" if pnl < 0 else "🟢"
-        status = ""
-        if s_id in rotated_ids: status = "🔄轮动"
-        elif s_id in closed_only_info: status = "🛑平仓"
-        elif s_id in liquidated_ids: status = "💥爆仓"
+        if eq == 0: icon = "💀"
         
-        # 仅显示有状态变化的，或者前3后3
-        if status or i < 3 or i > 20:
-            md_table += f"| S{s_id} | {inv:.0f} | {eq:.0f} | {icon}{pnl:+.0f} | {status} |\n"
+        # 简化表格，只显示有变动的或前3后3
+        is_active = (s_id in rotated_ids) or (s_id in liquidated_ids)
+        if is_active or i < 3 or i > 20:
+            status_str = "🔄" if s_id in rotated_ids else ("💥" if s_id in liquidated_ids else "-")
+            md_table += f"| {s_id} | {inv:.0f} | - | {eq:.0f} | {icon}{pnl:.0f} | - | {status_str} |\n"
             
     # 追涨策略数据
-    chase_strat = data[CHASE_STRAT_ID]
-    c_eq, c_details = calculate_strategy_equity(chase_strat, market_map)
-    c_inv = chase_strat.get('total_invested', 1000)
+    c_strat = data[CHASE_STRAT_ID]
+    c_eq, c_details = calculate_strategy_equity(c_strat, market_map)
+    c_inv = c_strat.get('total_invested', 1000)
     c_pnl = c_eq - c_inv
     
-    # 合并总资金
     total_equity += c_eq
     total_invested += c_inv
     total_pnl = total_equity - total_invested
@@ -599,11 +566,11 @@ def report_to_wechat(opener, data, market_map, rotated_ids, closed_only_info, li
     if rotated_ids: title = f"🔄S{len(rotated_ids)} | {title}"
     if chase_acted: title = f"🚀追涨 | {title}"
     
-    # 构造追涨策略详情
-    chase_info = ""
+    # 构造追涨详情
+    chase_info_str = "无持仓"
     if c_details:
         items = [f"{d['symbol'].replace('USDT','')}({d['pnl']:+.1f})" for d in c_details]
-        chase_info = f"\n🚀 **S_CHASE 持仓**: {', '.join(items)}"
+        chase_info_str = ", ".join(items)
     
     description = f"""
 **UTC**: {current_utc_str}
@@ -618,7 +585,7 @@ def report_to_wechat(opener, data, market_map, rotated_ids, closed_only_info, li
 ---
 ### 🚀 追涨策略 (Top 10 Chase)
 **净值**: {c_eq:.0f} U  **盈亏**: {c_pnl:+.1f} U
-{chase_info}
+**持仓**: {chase_info_str}
     """
     try:
         req = urllib.request.Request(f"https://sctapi.ftqq.com/{SERVERCHAN_KEY}.send", data=urllib.parse.urlencode({'title': title, 'desp': description}).encode('utf-8'), method='POST')
@@ -632,27 +599,27 @@ if __name__ == "__main__":
     if market_map:
         data = load_state()
         
-        # 0. 更新价格极值
+        # 0. 更新价格
         update_price_stats(data, market_map)
         
         # 1. 风控
         liquidated_ids = check_risk_management(opener, data, market_map)
         
-        # 2. 执行轮动策略 (S0-S23)
+        # 2. 轮动
         rotated_ids, closed_only_info = scan_and_execute_strategies(opener, data, market_map, top_10)
         
-        # 3. 执行追涨策略 (S_CHASE)
+        # 3. 追涨
         chase_acted = run_chase_strategy(data, market_map, top_10)
         
-        # 4. 记录净值
+        # 4. 净值
         record_equity_snapshot(data, market_map)
         
-        # 5. [聚合快照] 记录全网持仓
+        # 5. 快照
         if rotated_ids or closed_only_info or liquidated_ids or chase_acted:
             record_aggregated_snapshot(data, market_map)
         
         save_state(data)
         
-        # 发送通知
+        # 6. 通知
         if rotated_ids or closed_only_info or liquidated_ids or chase_acted:
             report_to_wechat(opener, data, market_map, rotated_ids, closed_only_info, liquidated_ids, chase_acted)
