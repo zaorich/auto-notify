@@ -57,7 +57,11 @@ def get_open_time_str(s_id_int):
     return f"{hour:02d}点"
 
 def analyze_market_mechanics(history_df):
-    """分析市场：昨日复盘 + 统计规律"""
+    """
+    分析市场：昨日复盘 + 统计规律 (向量化高性能版)
+    优化说明：移除双重循环，使用 groupby 和 transform 进行全表运算
+    """
+    # 1. 基础数据清洗
     df = history_df[history_df['Type'] == 'OPEN'].copy()
     if df.empty: return "无数据", "无数据"
 
@@ -66,103 +70,122 @@ def analyze_market_mechanics(history_df):
     df = df.dropna(subset=['Price'])
     df['Time_CN'] = df['Time'] + timedelta(hours=8)
 
-    # --- 1. 昨日新币复盘 ---
+    # ==========================================
+    # 模块一：昨日新币复盘 (Vectorized)
+    # ==========================================
     now = datetime.now()
     yesterday = now - timedelta(hours=24)
-    recent_df = df[df['Time'] > yesterday].copy()
     
+    # 筛选窗口内的数据
+    recent_df = df[df['Time'] > yesterday].copy()
     review_md = ""
     coin_data = []
-    
+
     if not recent_df.empty:
-        unique_coins = recent_df['Symbol'].unique()
-        for symbol in unique_coins:
-            coin_hist = df[df['Symbol'] == symbol].sort_values('Time')
-            entries_24h = coin_hist[coin_hist['Time'] > yesterday]
-            if entries_24h.empty: continue
-            
-            t0 = entries_24h.iloc[0]
-            t0_p = t0['Price']
-            
-            subsequent = coin_hist[coin_hist['Time'] >= t0['Time']]
-            if subsequent.empty: continue
-            
-            max_p = subsequent['Price'].max()
-            curr_p = subsequent.iloc[-1]['Price']
-            
-            # 这里的涨幅是相对于第一次上榜
-            max_pump = (max_p - t0_p) / t0_p * 100
-            curr_chg = (curr_p - t0_p) / t0_p * 100
-            
-            # 找到最高点延迟
-            max_row = subsequent[subsequent['Price'] == max_p].iloc[0]
-            delay = (max_row['Time'] - t0['Time']).total_seconds() / 3600
-            
-            # 格式化时间，只取小时
-            time_str = t0['Time_CN'].strftime("%H:%M")
-            
-            coin_data.append({
-                "sym": symbol.replace('USDT',''),
-                "time": time_str,
-                "pump": max_pump,
-                "delay": int(delay),
-                "curr": curr_chg
-            })
-            
-        if coin_data:
-            coin_data.sort(key=lambda x: x['pump'], reverse=True)
-            # 3列：币种(时间) | 最高涨 | 现价
+        # 确保按时间排序，这对 first()/last() 逻辑至关重要
+        recent_df = recent_df.sort_values(['Symbol', 'Time'])
+        g = recent_df.groupby('Symbol')
+        
+        # 1. 获取基准点 (t0)：窗口内的第一笔交易
+        t0 = g.first()
+        t0_prices = t0['Price']
+        t0_times = t0['Time']
+        
+        # 2. 获取统计点：最高价(High) 和 现价(Current)
+        # idxmax() 找到最高价的索引，然后 .loc 取出完整行(包含时间)
+        idx_max = g['Price'].idxmax()
+        # 注意：这里需要重新通过索引定位回原表以获取对应的时间
+        max_rows = recent_df.loc[idx_max].set_index('Symbol')
+        curr_rows = g.last()
+        
+        # 3. 向量化计算涨跌幅
+        # 注意：索引必须对齐 (Symbol)
+        pump_pct = (max_rows['Price'] - t0_prices) / t0_prices * 100
+        curr_pct = (curr_rows['Price'] - t0_prices) / t0_prices * 100
+        
+        # 4. 计算延迟 (小时)
+        delay_hours = (max_rows['Time'] - t0_times).dt.total_seconds() / 3600
+        
+        # 5. 汇总数据到 DataFrame 用于生成报告
+        stats = pd.DataFrame({
+            'sym': t0.index.str.replace('USDT', ''),
+            'time_str': t0['Time_CN'].dt.strftime("%H:%M"),
+            'pump': pump_pct,
+            'delay': delay_hours.fillna(0).astype(int), # fillna防止极少数异常
+            'curr': curr_pct
+        })
+        
+        # 排序并生成 Markdown
+        stats = stats.sort_values('pump', ascending=False)
+        
+        if not stats.empty:
             review_md = "| 币种(上榜) | 最高涨 | 现价 |\n| :-- | :--: | :--: |\n"
-            for c in coin_data:
-                # 组合显示：SOL(10:00)
-                coin_str = f"{c['sym']}<br>{c['time']}"
-                # 组合显示：+15%(5h)
-                pump_str = f"{c['pump']:+.0f}%({c['delay']}h)"
-                if c['pump'] > 10: pump_str = f"🔥{pump_str}"
-                
-                curr_str = f"{c['curr']:+.0f}%"
+            for _, row in stats.iterrows():
+                coin_str = f"{row['sym']}<br>{row['time_str']}"
+                pump_str = f"{row['pump']:+.0f}%({row['delay']}h)"
+                if row['pump'] > 10: pump_str = f"🔥{pump_str}"
+                curr_str = f"{row['curr']:+.0f}%"
                 
                 review_md += f"| {coin_str} | {pump_str} | {curr_str} |\n"
         else:
-            review_md = "无新币数据"
+             review_md = "无新币数据"
     else:
         review_md = "过去24h无新币"
 
-    # --- 2. 最佳做空时机 ---
-    df['Date'] = df['Time'].dt.date
-    grouped = df.groupby(['Symbol', 'Date'])
+    # ==========================================
+    # 模块二：最佳做空时机 (Vectorized)
+    # ==========================================
+    # 目标：计算同一天、同一币种下，后续K线相对于首根K线的涨跌幅
     
-    results = []
-    for _, group in grouped:
-        if len(group) < 2: continue
-        group = group.sort_values('Time')
-        t0_p = group.iloc[0]['Price']
-        t0_t = group.iloc[0]['Time']
-        
-        for i in range(1, len(group)):
-            curr = group.iloc[i]
-            diff = (curr['Time'] - t0_t).total_seconds() / 3600.0
-            chg = (curr['Price'] - t0_p) / t0_p * 100
-            results.append({'delay': int(round(diff)), 'chg': chg})
-            
+    df['Date'] = df['Time'].dt.date
+    # 全局排序，保证 groupby 后组内时间有序
+    df = df.sort_values(['Symbol', 'Date', 'Time'])
+    
+    g_short = df.groupby(['Symbol', 'Date'])
+    
+    # 使用 transform('first') 将每组的第一行数据(基准点)广播到全组，避免循环
+    t0_prices = g_short['Price'].transform('first')
+    t0_times = g_short['Time'].transform('first')
+    
+    # 向量化计算全表所有行的 diff 和 chg
+    delays = (df['Time'] - t0_times).dt.total_seconds() / 3600.0
+    changes = (df['Price'] - t0_prices) / t0_prices * 100.0
+    
+    # 标记每行在组内的序号
+    # cumcount() 会给每组的第一行标记 0，第二行标记 1...
+    row_indices = g_short.cumcount()
+    
+    # 筛选非首行数据 (即 row_indices > 0 的行，排除 delay=0 的基准点)
+    valid_mask = row_indices > 0
+    
     best_time_md = ""
-    if results:
-        res_df = pd.DataFrame(results)
-        summary = res_df.groupby('delay')['chg'].agg(['mean', 'count']).reset_index()
+    # 只有当存在有效数据时才进行聚合
+    if valid_mask.any():
+        # 构建中间表进行聚合
+        analysis_df = pd.DataFrame({
+            'delay': delays[valid_mask].round().astype(int),
+            'chg': changes[valid_mask]
+        })
+        
+        # 聚合：按延迟时间统计均值
+        # 筛选至少有3个样本的数据点，保证统计意义
+        summary = analysis_df.groupby('delay')['chg'].agg(['mean', 'count']).reset_index()
         summary = summary[summary['count'] >= 3]
         
-        # 3列：延迟 | 均涨跌 | 建议
-        best_time_md = "| 延迟 | 均涨跌 | 建议 |\n| :--: | :--: | :--: |\n"
-        for _, row in summary.iterrows():
-            h = int(row['delay'])
-            avg = row['mean']
-            
-            s = "👀"
-            if avg > 8: s = "⛔️"
-            elif avg > 3: s = "🚀"
-            elif avg < -1: s = "✅"
-            
-            best_time_md += f"| +{h}h | {avg:+.1f}% | {s} |\n"
+        if not summary.empty:
+            best_time_md = "| 延迟 | 均涨跌 | 建议 |\n| :--: | :--: | :--: |\n"
+            for _, row in summary.iterrows():
+                h = int(row['delay'])
+                avg = row['mean']
+                
+                s = "👀"
+                if avg > 8: s = "⛔️"
+                elif avg > 3: s = "🚀"
+                elif avg < -1: s = "✅"
+                
+                best_time_md += f"| +{h}h | {avg:+.1f}% | {s} |\n"
+        else:
+            best_time_md = "数据积累中..."
     else:
         best_time_md = "数据积累中..."
 
@@ -181,12 +204,14 @@ def analyze_strategies():
     history_df = robust_read_csv(HISTORY_FILE, HISTORY_COLS)
     equity_df = robust_read_csv(EQUITY_FILE, EQUITY_COLS)
 
-    if history_df.empty: return
+    if history_df.empty: 
+        print("❌ 未找到历史数据或文件为空")
+        return
 
     history_df['Strategy_ID'] = pd.to_numeric(history_df['Strategy_ID'], errors='coerce')
     history_df['Round_PnL'] = pd.to_numeric(history_df['Round_PnL'], errors='coerce').fillna(0)
 
-    # 1. 市场分析
+    # 1. 市场分析 (调用优化后的函数)
     review_md, best_time_md = analyze_market_mechanics(history_df)
 
     # 2. 策略排行
