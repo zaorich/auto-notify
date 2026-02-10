@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 # ==========================================
 PROXY_ADDR = "127.0.0.1:10808"
 STATE_FILE = "strategy_state.json"
-HISTORY_FILE = "strategy_history.csv"  # 所有数据（含快照）都记在这里
+HISTORY_FILE = "strategy_history.csv"  # 统一记录文件
 EQUITY_FILE = "equity_curve.csv"
 
 # --- [新功能开关] ---
@@ -138,7 +138,7 @@ def log_to_csv(record_type, strategy_id, symbol, price, high_price, amount, pos_
     change_str = ""
     if record_type == "OPEN": change_str = f"涨:{change_pct_val:>+5.1f}%"
     
-    # 控制台打印 (SNAPSHOT 不打印以免刷屏，或者打印简略信息)
+    # 控制台打印 (SNAPSHOT 不打印以免刷屏)
     if record_type != "SNAPSHOT":
         print(f"📝 [CSV] {record_type:<10} S{strategy_id:<2} {symbol:<8} 净:{equity_val:.0f} 投:{invested_val:.0f} 押:{used_margin_val:.0f} 轮:{round_pnl_val:+.0f} {change_str} | {note}")
 
@@ -154,56 +154,57 @@ def log_to_csv(record_type, strategy_id, symbol, price, high_price, amount, pos_
         print(f"❌ 写入历史CSV失败: {e}")
 
 # ==========================================
-#               [修改] 全仓快照逻辑
+#               [优化版] 聚合快照逻辑
 # ==========================================
-def record_positions_snapshot_to_history(data, market_map):
+def record_aggregated_snapshot(data, market_map):
     """
-    将当前所有持仓的状态作为 SNAPSHOT 类型记录到主 CSV 中。
+    按币种聚合记录快照。
+    如果不论多少个策略持有，只记录一条该币种的当前价格信息。
     """
-    print(f"📸 [快照] 正在将全网持仓快照写入 {HISTORY_FILE} ...")
-    count = 0
+    print(f"📸 [快照] 正在聚合记录持仓币种价格...")
+    
+    # 1. 聚合数据: Symbol -> {count: 0, total_entry: 0, s_ids: []}
+    agg_data = {}
     
     for s_id, strat in data.items():
         if not strat.get('positions'): continue
         
-        # 为了记录准确的 equity，先计算一下
-        wallet_balance = strat['balance']
-        total_pnl = 0.0
-        used_margin = 0.0
-        
-        # 预计算该策略的总浮动盈亏
-        temp_positions_data = []
         for pos in strat['positions']:
+            sym = pos['symbol']
             entry = float(pos['entry_price'])
-            amount = float(pos['amount'])
-            curr = float(market_map.get(pos['symbol'], entry))
-            pnl = (entry - curr) * amount
-            total_pnl += pnl
-            used_margin += float(pos.get('margin', 0))
-            temp_positions_data.append((pos, curr, pnl))
             
-        current_equity = wallet_balance + total_pnl
-        total_invested = strat.get('total_invested', INITIAL_UNIT)
+            if sym not in agg_data:
+                agg_data[sym] = {'count': 0, 'total_entry': 0.0, 's_ids': []}
+            
+            agg_data[sym]['count'] += 1
+            agg_data[sym]['total_entry'] += entry
+            agg_data[sym]['s_ids'].append(str(s_id))
+    
+    if not agg_data:
+        print("📸 [快照] 当前无持仓，跳过。")
+        return
+
+    # 2. 写入 CSV
+    count = 0
+    for sym, info in agg_data.items():
+        # 获取当前市场价
+        curr_price = float(market_map.get(sym, 0))
+        if curr_price == 0: continue
         
-        # 逐条写入持仓记录
-        for pos_data in temp_positions_data:
-            pos, curr_price, pnl = pos_data
-            symbol = pos['symbol']
-            entry = float(pos['entry_price'])
-            amount = float(pos['amount'])
+        # 计算平均开仓价 (仅供参考)
+        avg_entry = info['total_entry'] / info['count']
+        
+        # 构造备注信息
+        s_list = ",".join(info['s_ids'])
+        # 备注格式: 持仓数 | 平均成本 | 持有策略ID
+        note_str = f"Hold:{info['count']} | AvgEntry:{avg_entry:.4g} | S:{s_list}"
+        
+        # 写入: Type=SNAPSHOT, Strategy_ID=AGG (聚合)
+        log_to_csv("SNAPSHOT", "AGG", sym, curr_price, 0, 0, 0, 
+                   0, 0, 0, 0, 0, note_str)
+        count += 1
             
-            # 获取极值
-            max_p = float(pos.get('max_price', entry))
-            min_p = float(pos.get('min_price', entry))
-            
-            # 构造 Note 包含详细信息
-            note_str = f"Entry:{entry:.4g} | Max:{max_p:.4g} | Min:{min_p:.4g}"
-            
-            log_to_csv("SNAPSHOT", s_id, symbol, curr_price, 0, amount, pnl, 
-                       current_equity, total_invested, used_margin, 0, 0, note_str)
-            count += 1
-            
-    print(f"✅ [快照] 完成，共记录 {count} 条持仓状态。")
+    print(f"✅ [快照] 完成，共记录 {count} 个独立币种的价格信息。")
 
 def record_equity_snapshot(data, market_map):
     file_exists = os.path.isfile(EQUITY_FILE)
@@ -493,22 +494,21 @@ if __name__ == "__main__":
     if market_map:
         data = load_state()
         
-        # 0. 更新所有持仓的价格统计 (Max/Min)
+        # 0. 更新价格
         update_price_stats(data, market_map)
         
-        # 1. 风控 (仅输出 summary，除非爆仓)
+        # 1. 风控
         liquidated_ids = check_risk_management(opener, data, market_map)
         
-        # 2. 智能扫描
+        # 2. 轮动
         rotated_ids, closed_only_info = scan_and_execute_strategies(opener, data, market_map, top_10)
         
-        # 3. 记录净值
+        # 3. 净值
         record_equity_snapshot(data, market_map)
         
-        # 4. [修改] 强制记录快照到主 CSV
-        # 只要有任何操作(rotated_ids)，就触发一次所有持仓的快照记录
+        # 4. [修改] 聚合记录快照到主文件
         if rotated_ids or closed_only_info or liquidated_ids:
-            record_positions_snapshot_to_history(data, market_map)
+            record_aggregated_snapshot(data, market_map)
         
         save_state(data)
         
