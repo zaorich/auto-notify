@@ -28,7 +28,7 @@
         "leverage": 3.0,
         "entry_time": 1774403553,
         "max_price": 0.16678,
-        "min_price": 0.16348,
+        "min_price": 0.15311,
         "side": "SHORT"
       },
       {
@@ -38,7 +38,7 @@
         "amount": 321.36110950379947,
         "leverage": 3.0,
         "entry_time": 1774403553,
-        "max_price": 1.70533,
+        "max_price": 1.87274,
         "min_price": 1.65733,
         "side": "SHORT"
       },
@@ -49,7 +49,7 @@
         "amount": 8550.35170354683,
         "leverage": 3.0,
         "entry_time": 1774403553,
-        "max_price": 0.06229,
+        "max_price": 0.06338,
         "min_price": 0.06226,
         "side": "SHORT"
       },
@@ -94,7 +94,7 @@
         "leverage": 3.0,
         "entry_time": 1774403553,
         "max_price": 0.06135,
-        "min_price": 0.06005,
+        "min_price": 0.05904,
         "side": "SHORT"
       },
       {
@@ -105,7 +105,7 @@
         "leverage": 3.0,
         "entry_time": 1774403553,
         "max_price": 0.12804,
-        "min_price": 0.12407,
+        "min_price": 0.12,
         "side": "SHORT"
       },
       {
@@ -148,7 +148,7 @@
         "amount": 233.4007371146245,
         "leverage": 3.0,
         "entry_time": 1774412346,
-        "max_price": 1.70533,
+        "max_price": 1.87274,
         "min_price": 1.70533,
         "side": "SHORT"
       },
@@ -159,7 +159,7 @@
         "amount": 6258.259104145952,
         "leverage": 3.0,
         "entry_time": 1774412346,
-        "max_price": 0.0636,
+        "max_price": 0.066,
         "min_price": 0.0636,
         "side": "SHORT"
       },
@@ -171,7 +171,7 @@
         "leverage": 3.0,
         "entry_time": 1774412346,
         "max_price": 0.16348,
-        "min_price": 0.16348,
+        "min_price": 0.15311,
         "side": "SHORT"
       },
       {
@@ -181,7 +181,7 @@
         "amount": 6392.953405455872,
         "leverage": 3.0,
         "entry_time": 1774412346,
-        "max_price": 0.06226,
+        "max_price": 0.06338,
         "min_price": 0.06226,
         "side": "SHORT"
       },
@@ -193,7 +193,7 @@
         "leverage": 3.0,
         "entry_time": 1774412346,
         "max_price": 0.02146,
-        "min_price": 0.02146,
+        "min_price": 0.02125,
         "side": "SHORT"
       },
       {
@@ -203,7 +203,7 @@
         "amount": 71651.71539580244,
         "leverage": 3.0,
         "entry_time": 1774412346,
-        "max_price": 0.005555,
+        "max_price": 0.00562,
         "min_price": 0.005555,
         "side": "SHORT"
       },
@@ -215,7 +215,7 @@
         "leverage": 3.0,
         "entry_time": 1774412346,
         "max_price": 0.3813,
-        "min_price": 0.3813,
+        "min_price": 0.3638,
         "side": "SHORT"
       },
       {
@@ -225,7 +225,7 @@
         "amount": 36469.23941943216,
         "leverage": 3.0,
         "entry_time": 1774412346,
-        "max_price": 0.010914,
+        "max_price": 0.011407,
         "min_price": 0.010914,
         "side": "SHORT"
       },
@@ -237,7 +237,7 @@
         "leverage": 3.0,
         "entry_time": 1774412346,
         "max_price": 0.02102,
-        "min_price": 0.02102,
+        "min_price": 0.02094,
         "side": "SHORT"
       },
       {
@@ -248,7 +248,7 @@
         "leverage": 3.0,
         "entry_time": 1774412346,
         "max_price": 0.06005,
-        "min_price": 0.06005,
+        "min_price": 0.05904,
         "side": "SHORT"
       }
     ],
@@ -257,120 +257,120 @@
     "liquidation_count": 1
   },
   "5": {
-    "balance": 1431.378185591348,
+    "balance": 1379.7727920204004,
     "positions": [
       {
-        "symbol": "BRUSDT",
-        "entry_price": 0.13769,
-        "margin": 143.13781855913481,
-        "amount": 3118.6974775031185,
+        "symbol": "SIRENUSDT",
+        "entry_price": 1.87274,
+        "margin": 137.97727920204005,
+        "amount": 221.03006162420846,
         "leverage": 3.0,
-        "entry_time": 1774331919,
-        "max_price": 0.17432,
-        "min_price": 0.11771,
+        "entry_time": 1774417521,
+        "max_price": 1.87274,
+        "min_price": 1.87274,
         "side": "SHORT"
       },
       {
-        "symbol": "LIGHTUSDT",
-        "entry_price": 0.3384,
-        "margin": 143.13781855913481,
-        "amount": 1268.9522921909115,
+        "symbol": "ONTUSDT",
+        "entry_price": 0.066,
+        "margin": 137.97727920204005,
+        "amount": 6271.694509183639,
         "leverage": 3.0,
-        "entry_time": 1774331919,
-        "max_price": 0.3384,
-        "min_price": 0.2009,
+        "entry_time": 1774417521,
+        "max_price": 0.066,
+        "min_price": 0.066,
         "side": "SHORT"
       },
       {
-        "symbol": "NAORISUSDT",
-        "entry_price": 0.0701,
-        "margin": 143.13781855913481,
-        "amount": 6125.726899820321,
+        "symbol": "CUSDT",
+        "entry_price": 0.06338,
+        "margin": 137.97727920204005,
+        "amount": 6530.953575356897,
         "leverage": 3.0,
-        "entry_time": 1774331919,
-        "max_price": 0.07093,
-        "min_price": 0.05654,
+        "entry_time": 1774417521,
+        "max_price": 0.06338,
+        "min_price": 0.06338,
         "side": "SHORT"
       },
       {
-        "symbol": "DUSKUSDT",
-        "entry_price": 0.11414,
-        "margin": 143.13781855913481,
-        "amount": 3762.16449691085,
+        "symbol": "BASUSDT",
+        "entry_price": 0.011407,
+        "margin": 137.97727920204005,
+        "amount": 36287.52850058036,
         "leverage": 3.0,
-        "entry_time": 1774331919,
-        "max_price": 0.12833,
-        "min_price": 0.11348,
+        "entry_time": 1774417521,
+        "max_price": 0.011407,
+        "min_price": 0.011407,
         "side": "SHORT"
       },
       {
-        "symbol": "HUMAUSDT",
-        "entry_price": 0.017246,
-        "margin": 143.13781855913481,
-        "amount": 24899.30741490226,
+        "symbol": "XNYUSDT",
+        "entry_price": 0.00562,
+        "margin": 137.97727920204005,
+        "amount": 73653.35188721,
         "leverage": 3.0,
-        "entry_time": 1774331919,
-        "max_price": 0.020808,
-        "min_price": 0.016774,
+        "entry_time": 1774417521,
+        "max_price": 0.00562,
+        "min_price": 0.00562,
         "side": "SHORT"
       },
       {
-        "symbol": "4USDT",
-        "entry_price": 0.010268,
-        "margin": 143.13781855913481,
-        "amount": 41820.55470173398,
+        "symbol": "HIPPOUSDT",
+        "entry_price": 0.0006538,
+        "margin": 137.97727920204005,
+        "amount": 633116.9128267363,
         "leverage": 3.0,
-        "entry_time": 1774331919,
-        "max_price": 0.011729,
-        "min_price": 0.010006,
+        "entry_time": 1774417521,
+        "max_price": 0.0006538,
+        "min_price": 0.0006538,
         "side": "SHORT"
       },
       {
         "symbol": "ARIAUSDT",
-        "entry_price": 0.25185,
-        "margin": 143.13781855913481,
-        "amount": 1705.0365522231662,
+        "entry_price": 0.29826,
+        "margin": 137.97727920204005,
+        "amount": 1387.8221605515996,
         "leverage": 3.0,
-        "entry_time": 1774331919,
-        "max_price": 0.31865,
-        "min_price": 0.25185,
+        "entry_time": 1774417521,
+        "max_price": 0.29826,
+        "min_price": 0.29826,
         "side": "SHORT"
       },
       {
-        "symbol": "APTUSDT",
-        "entry_price": 1.0688,
-        "margin": 143.13781855913481,
-        "amount": 401.77157155445775,
+        "symbol": "SKYAIUSDT",
+        "entry_price": 0.06011,
+        "margin": 137.97727920204005,
+        "amount": 6886.239188256865,
         "leverage": 3.0,
-        "entry_time": 1774331919,
-        "max_price": 1.1092,
-        "min_price": 1.0317,
+        "entry_time": 1774417521,
+        "max_price": 0.06011,
+        "min_price": 0.06011,
         "side": "SHORT"
       },
       {
-        "symbol": "JTOUSDT",
-        "entry_price": 0.3252,
-        "margin": 143.13781855913481,
-        "amount": 1320.4595808038268,
+        "symbol": "FHEUSDT",
+        "entry_price": 0.02094,
+        "margin": 137.97727920204005,
+        "amount": 19767.518510320922,
         "leverage": 3.0,
-        "entry_time": 1774331919,
-        "max_price": 0.3813,
-        "min_price": 0.3117,
+        "entry_time": 1774417521,
+        "max_price": 0.02094,
+        "min_price": 0.02094,
         "side": "SHORT"
       },
       {
-        "symbol": "SPORTFUNUSDT",
-        "entry_price": 0.03434,
-        "margin": 143.13781855913481,
-        "amount": 12504.759920716495,
+        "symbol": "TAKEUSDT",
+        "entry_price": 0.01864,
+        "margin": 137.97727920204005,
+        "amount": 22206.643648397003,
         "leverage": 3.0,
-        "entry_time": 1774331919,
-        "max_price": 0.03599,
-        "min_price": 0.03382,
+        "entry_time": 1774417521,
+        "max_price": 0.01864,
+        "min_price": 0.01864,
         "side": "SHORT"
       }
     ],
-    "last_trade_date": "2026-03-24",
+    "last_trade_date": "2026-03-25",
     "total_invested": 0.0,
     "liquidation_count": 1
   },
@@ -554,7 +554,7 @@
         "leverage": 3.0,
         "entry_time": 1774339504,
         "max_price": 0.14254,
-        "min_price": 0.12896,
+        "min_price": 0.1256,
         "side": "SHORT"
       },
       {
@@ -650,7 +650,7 @@
         "leverage": 3.0,
         "entry_time": 1774343502,
         "max_price": 0.12833,
-        "min_price": 0.12016,
+        "min_price": 0.12,
         "side": "SHORT"
       },
       {
@@ -727,7 +727,7 @@
         "leverage": 3.0,
         "entry_time": 1774343502,
         "max_price": 0.14254,
-        "min_price": 0.12896,
+        "min_price": 0.1256,
         "side": "SHORT"
       }
     ],
@@ -757,7 +757,7 @@
         "leverage": 3.0,
         "entry_time": 1774347120,
         "max_price": 0.12833,
-        "min_price": 0.12016,
+        "min_price": 0.12,
         "side": "SHORT"
       },
       {
@@ -844,7 +844,7 @@
         "amount": 4326.996319370185,
         "leverage": 3.0,
         "entry_time": 1774347120,
-        "max_price": 0.05946,
+        "max_price": 0.06011,
         "min_price": 0.0567,
         "side": "SHORT"
       }
@@ -886,7 +886,7 @@
         "leverage": 3.0,
         "entry_time": 1774350626,
         "max_price": 0.12833,
-        "min_price": 0.12016,
+        "min_price": 0.12,
         "side": "SHORT"
       },
       {
@@ -941,7 +941,7 @@
         "leverage": 3.0,
         "entry_time": 1774350626,
         "max_price": 0.14254,
-        "min_price": 0.12896,
+        "min_price": 0.1256,
         "side": "SHORT"
       },
       {
@@ -951,7 +951,7 @@
         "amount": 28220.278134317938,
         "leverage": 3.0,
         "entry_time": 1774350626,
-        "max_price": 0.013351,
+        "max_price": 0.013482,
         "min_price": 0.012468,
         "side": "SHORT"
       },
@@ -962,7 +962,7 @@
         "amount": 6174.304638267881,
         "leverage": 3.0,
         "entry_time": 1774350626,
-        "max_price": 0.05946,
+        "max_price": 0.06011,
         "min_price": 0.0567,
         "side": "SHORT"
       }
@@ -1000,7 +1000,7 @@
         "leverage": 3.0,
         "entry_time": 1774357712,
         "max_price": 0.12833,
-        "min_price": 0.12016,
+        "min_price": 0.12,
         "side": "SHORT"
       },
       {
@@ -1043,7 +1043,7 @@
         "amount": 1860.490056084047,
         "leverage": 3.0,
         "entry_time": 1774357712,
-        "max_price": 0.05946,
+        "max_price": 0.06011,
         "min_price": 0.0567,
         "side": "SHORT"
       },
@@ -1140,7 +1140,7 @@
         "leverage": 3.0,
         "entry_time": 1774363227,
         "max_price": 0.12833,
-        "min_price": 0.12016,
+        "min_price": 0.12,
         "side": "SHORT"
       },
       {
@@ -1184,7 +1184,7 @@
         "leverage": 3.0,
         "entry_time": 1774363227,
         "max_price": 0.14254,
-        "min_price": 0.12896,
+        "min_price": 0.1256,
         "side": "SHORT"
       },
       {
@@ -1205,7 +1205,7 @@
         "amount": 1891.5614327276578,
         "leverage": 3.0,
         "entry_time": 1774363227,
-        "max_price": 0.06855,
+        "max_price": 0.06921,
         "min_price": 0.06294,
         "side": "SHORT"
       }
@@ -1269,7 +1269,7 @@
         "leverage": 3.0,
         "entry_time": 1774367355,
         "max_price": 0.12833,
-        "min_price": 0.12016,
+        "min_price": 0.12,
         "side": "SHORT"
       },
       {
@@ -1387,7 +1387,7 @@
         "leverage": 3.0,
         "entry_time": 1774371483,
         "max_price": 0.12833,
-        "min_price": 0.12016,
+        "min_price": 0.12,
         "side": "SHORT"
       },
       {
@@ -1505,7 +1505,7 @@
         "leverage": 3.0,
         "entry_time": 1774374975,
         "max_price": 0.12833,
-        "min_price": 0.12016,
+        "min_price": 0.12,
         "side": "SHORT"
       },
       {
@@ -1537,7 +1537,7 @@
         "amount": 1187.2347847992144,
         "leverage": 3.0,
         "entry_time": 1774374975,
-        "max_price": 0.05946,
+        "max_price": 0.06011,
         "min_price": 0.0567,
         "side": "SHORT"
       },
@@ -1560,7 +1560,7 @@
         "leverage": 3.0,
         "entry_time": 1774374975,
         "max_price": 0.011729,
-        "min_price": 0.010834,
+        "min_price": 0.010496,
         "side": "SHORT"
       }
     ],
@@ -1623,7 +1623,7 @@
         "leverage": 3.0,
         "entry_time": 1774378798,
         "max_price": 0.12833,
-        "min_price": 0.12257,
+        "min_price": 0.12,
         "side": "SHORT"
       },
       {
@@ -1666,7 +1666,7 @@
         "amount": 4377.513482459496,
         "leverage": 3.0,
         "entry_time": 1774378798,
-        "max_price": 0.05946,
+        "max_price": 0.06011,
         "min_price": 0.0567,
         "side": "SHORT"
       },
@@ -1741,7 +1741,7 @@
         "leverage": 3.0,
         "entry_time": 1774382150,
         "max_price": 0.12833,
-        "min_price": 0.12257,
+        "min_price": 0.12,
         "side": "SHORT"
       },
       {
@@ -1784,7 +1784,7 @@
         "amount": 2848.2053504567484,
         "leverage": 3.0,
         "entry_time": 1774382150,
-        "max_price": 0.05922,
+        "max_price": 0.06011,
         "min_price": 0.0567,
         "side": "SHORT"
       },
@@ -1859,7 +1859,7 @@
         "leverage": 3.0,
         "entry_time": 1774384710,
         "max_price": 0.12833,
-        "min_price": 0.12407,
+        "min_price": 0.12,
         "side": "SHORT"
       },
       {
@@ -1977,7 +1977,7 @@
         "leverage": 3.0,
         "entry_time": 1774387489,
         "max_price": 0.12833,
-        "min_price": 0.12407,
+        "min_price": 0.12,
         "side": "SHORT"
       },
       {
@@ -2010,7 +2010,7 @@
         "leverage": 3.0,
         "entry_time": 1774387489,
         "max_price": 0.14254,
-        "min_price": 0.12896,
+        "min_price": 0.1256,
         "side": "SHORT"
       },
       {
@@ -2021,7 +2021,7 @@
         "leverage": 3.0,
         "entry_time": 1774387489,
         "max_price": 0.020808,
-        "min_price": 0.019516,
+        "min_price": 0.019416,
         "side": "SHORT"
       },
       {
@@ -2031,7 +2031,7 @@
         "amount": 5826.212764747239,
         "leverage": 3.0,
         "entry_time": 1774387489,
-        "max_price": 0.05922,
+        "max_price": 0.06011,
         "min_price": 0.0567,
         "side": "SHORT"
       }
@@ -2106,7 +2106,7 @@
         "leverage": 3.0,
         "entry_time": 1774389738,
         "max_price": 0.12833,
-        "min_price": 0.12407,
+        "min_price": 0.12,
         "side": "SHORT"
       },
       {
@@ -2117,7 +2117,7 @@
         "leverage": 3.0,
         "entry_time": 1774389738,
         "max_price": 0.020808,
-        "min_price": 0.019516,
+        "min_price": 0.019416,
         "side": "SHORT"
       },
       {
@@ -2150,7 +2150,7 @@
         "leverage": 3.0,
         "entry_time": 1774389738,
         "max_price": 0.14232,
-        "min_price": 0.12896,
+        "min_price": 0.1256,
         "side": "SHORT"
       }
     ],
@@ -2224,7 +2224,7 @@
         "leverage": 3.0,
         "entry_time": 1774393588,
         "max_price": 0.12833,
-        "min_price": 0.12407,
+        "min_price": 0.12,
         "side": "SHORT"
       },
       {
@@ -2257,7 +2257,7 @@
         "leverage": 3.0,
         "entry_time": 1774393588,
         "max_price": 0.020808,
-        "min_price": 0.019516,
+        "min_price": 0.019416,
         "side": "SHORT"
       },
       {
@@ -2277,19 +2277,8 @@
     "liquidation_count": 0
   },
   "S_CHASE": {
-    "balance": 846.1152825137558,
+    "balance": 827.3837059170609,
     "positions": [
-      {
-        "symbol": "4USDT",
-        "entry_price": 0.011195,
-        "margin": 100.0,
-        "amount": 26797.677534613667,
-        "leverage": 3.0,
-        "entry_time": 1774374975,
-        "max_price": 0.011729,
-        "min_price": 0.010834,
-        "side": "LONG"
-      },
       {
         "symbol": "BATUSDT",
         "entry_price": 0.1112,
@@ -2331,7 +2320,7 @@
         "leverage": 3.0,
         "entry_time": 1774387489,
         "max_price": 0.14254,
-        "min_price": 0.12896,
+        "min_price": 0.1256,
         "side": "LONG"
       },
       {
@@ -2342,7 +2331,7 @@
         "leverage": 3.0,
         "entry_time": 1774387489,
         "max_price": 0.020808,
-        "min_price": 0.019516,
+        "min_price": 0.019416,
         "side": "LONG"
       },
       {
@@ -2363,7 +2352,7 @@
         "amount": 181.01404065575355,
         "leverage": 3.0,
         "entry_time": 1774403553,
-        "max_price": 1.70533,
+        "max_price": 1.87274,
         "min_price": 1.65733,
         "side": "LONG"
       },
@@ -2385,7 +2374,7 @@
         "amount": 54005.400540054005,
         "leverage": 3.0,
         "entry_time": 1774412346,
-        "max_price": 0.005555,
+        "max_price": 0.00562,
         "min_price": 0.005555,
         "side": "LONG"
       },
@@ -2397,26 +2386,59 @@
         "leverage": 3.0,
         "entry_time": 1774412346,
         "max_price": 0.3813,
-        "min_price": 0.3813,
+        "min_price": 0.3638,
+        "side": "LONG"
+      },
+      {
+        "symbol": "TAKEUSDT",
+        "entry_price": 0.01864,
+        "margin": 100.0,
+        "amount": 16094.42060085837,
+        "leverage": 3.0,
+        "entry_time": 1774417521,
+        "max_price": 0.01864,
+        "min_price": 0.01864,
+        "side": "LONG"
+      },
+      {
+        "symbol": "HIPPOUSDT",
+        "entry_price": 0.0006538,
+        "margin": 100.0,
+        "amount": 458855.91924135824,
+        "leverage": 3.0,
+        "entry_time": 1774417521,
+        "max_price": 0.0006538,
+        "min_price": 0.0006538,
+        "side": "LONG"
+      },
+      {
+        "symbol": "SKYAIUSDT",
+        "entry_price": 0.06011,
+        "margin": 100.0,
+        "amount": 4990.850108135086,
+        "leverage": 3.0,
+        "entry_time": 1774417521,
+        "max_price": 0.06011,
+        "min_price": 0.06011,
         "side": "LONG"
       }
     ],
     "prev_top10": [
-      "SIRENUSDT",
-      "BRUSDT",
-      "TAUSDT",
-      "BASUSDT",
-      "IRYSUSDT",
-      "FHEUSDT",
       "CUSDT",
+      "SIRENUSDT",
+      "TAKEUSDT",
       "XNYUSDT",
-      "JTOUSDT",
-      "ONTUSDT"
+      "SKYAIUSDT",
+      "FHEUSDT",
+      "ONTUSDT",
+      "ARIAUSDT",
+      "HIPPOUSDT",
+      "BASUSDT"
     ],
     "total_invested": 1000.0,
     "liquidation_count": 127,
-    "closed_count": 841,
+    "closed_count": 842,
     "wins": 354,
-    "accumulated_pnl": 637.1734049942222
+    "accumulated_pnl": 618.4418283975273
   }
 }
